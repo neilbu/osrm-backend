@@ -31,7 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class BasePlugin;
 namespace http
 {
-class Reply;
+class reply;
 }
 struct RouteParameters;
 

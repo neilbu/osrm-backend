@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM, Dennis Luxen, others
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -28,9 +28,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "polyline_formatter.hpp"
 
 #include "polyline_compressor.hpp"
+#include "../data_structures/coordinate_calculation.hpp"
 #include "../data_structures/segment_information.hpp"
 
-#include <osrm/coordinate.hpp>
 
 std::string PolylineFormatter::printEncodedStr(const std::vector<SegmentInformation> &polyline) const
 {
@@ -45,9 +45,9 @@ std::vector<std::string> PolylineFormatter::printUnencodedStr(const std::vector<
         if (segment.necessary)
         {
             std::string tmp, res;
-            FixedPointCoordinate::convertInternalLatLonToString(segment.location.lat, tmp);
+            coordinate_calculation::lat_or_lon_to_string(segment.location.lat, tmp);
             res += (tmp + ",");
-            FixedPointCoordinate::convertInternalLatLonToString(segment.location.lon, tmp);
+            coordinate_calculation::lat_or_lon_to_string(segment.location.lon, tmp);
             res += tmp;
             output.push_back(res);
         }

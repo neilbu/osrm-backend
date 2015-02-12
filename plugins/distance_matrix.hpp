@@ -108,15 +108,12 @@ template <class DataFacadeT> class DistanceMatrixPlugin final : public BasePlugi
         }
 
         TIMER_START(multi_target);
-        //ret = search_engine_ptr->distance_table(phantom_node_vector);
 
         unsigned nodeCount = phantom_node_vector.size();
         std::shared_ptr<std::vector<std::pair<EdgeWeight, double>>> results = std::make_shared<std::vector<std::pair<EdgeWeight, double>>>();
-        //SimpleLogger().Write(logDEBUG) << nodeCount << " nodes";
         results->reserve(nodeCount * nodeCount);
         for (unsigned sourceIndex = 0; sourceIndex < nodeCount; ++sourceIndex)
         {
-            SimpleLogger().Write(logDEBUG) << sourceIndex;
             const auto &source = phantom_node_vector[sourceIndex];
             const std::vector<PhantomNode> &phantom_node_source = source;
             for (unsigned targetIndex = 0; targetIndex < nodeCount; ++targetIndex)
@@ -149,7 +146,6 @@ template <class DataFacadeT> class DistanceMatrixPlugin final : public BasePlugi
                                                      route_parameters.uturns, raw_route);
                     if (raw_route.shortest_path_length == INVALID_EDGE_WEIGHT)
                     {
-                        SimpleLogger().Write(logDEBUG) << "Using alternative path";
                         search_engine_ptr->alternative_path(raw_route.segment_end_coordinates.front(), raw_route);
                     }
 

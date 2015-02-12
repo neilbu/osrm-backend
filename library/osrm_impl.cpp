@@ -42,6 +42,7 @@ class named_mutex;
 #include "../plugins/nearest.hpp"
 #include "../plugins/timestamp.hpp"
 #include "../plugins/viaroute.hpp"
+#include "../plugins/distance_matrix.hpp"
 #include "../server/data_structures/datafacade_base.hpp"
 #include "../server/data_structures/internal_datafacade.hpp"
 #include "../server/data_structures/shared_barriers.hpp"
@@ -83,6 +84,7 @@ OSRM_impl::OSRM_impl(libosrm_config &lib_config)
     RegisterPlugin(new NearestPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
     RegisterPlugin(new TimestampPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
     RegisterPlugin(new ViaRoutePlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
+    RegisterPlugin(new DistanceMatrixPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
 }
 
 OSRM_impl::~OSRM_impl()

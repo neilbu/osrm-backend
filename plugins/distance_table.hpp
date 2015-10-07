@@ -76,9 +76,7 @@ template <class DataFacadeT> class DistanceTablePlugin final : public BasePlugin
         }
 
         const bool checksum_OK = (route_parameters.check_sum == facade->GetCheckSum());
-        unsigned max_locations =
-            std::min(static_cast<unsigned>(max_locations_distance_table),
-                     static_cast<unsigned>(route_parameters.coordinates.size()));
+        unsigned max_locations = static_cast<unsigned>(route_parameters.coordinates.size());
 
         PhantomNodeArray phantom_node_vector(max_locations);
         for (const auto i : osrm::irange(0u, max_locations))

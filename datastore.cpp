@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -60,7 +60,6 @@ using QueryGraph = StaticGraph<QueryEdge::EdgeData>;
 #include <boost/iostreams/seek.hpp>
 
 #include <cstdint>
-
 
 #include <fstream>
 #include <string>
@@ -165,6 +164,10 @@ int main(const int argc, const char *argv[])
         {
             throw osrm::exception("no geometry file found");
         }
+        if (server_paths.find("core") == server_paths.end())
+        {
+            throw osrm::exception("no core file found");
+        }
 
         ServerPaths::const_iterator paths_iterator = server_paths.find("hsgrdata");
         BOOST_ASSERT(server_paths.end() != paths_iterator);
@@ -200,6 +203,10 @@ int main(const int argc, const char *argv[])
         BOOST_ASSERT(server_paths.end() != paths_iterator);
         BOOST_ASSERT(!paths_iterator->second.empty());
         const boost::filesystem::path &geometries_data_path = paths_iterator->second;
+        paths_iterator = server_paths.find("core");
+        BOOST_ASSERT(server_paths.end() != paths_iterator);
+        BOOST_ASSERT(!paths_iterator->second.empty());
+        const boost::filesystem::path &core_marker_path = paths_iterator->second;
 
         // determine segment to use
         bool segment2_in_use = SharedMemory::RegionExists(LAYOUT_2);
@@ -223,8 +230,7 @@ int main(const int argc, const char *argv[])
         // Allocate a memory layout in shared memory, deallocate previous
         SharedMemory *layout_memory =
             SharedMemoryFactory::Get(layout_region, sizeof(SharedDataLayout));
-        SharedDataLayout *shared_layout_ptr = static_cast<SharedDataLayout *>(layout_memory->Ptr());
-        shared_layout_ptr = new (layout_memory->Ptr()) SharedDataLayout();
+        SharedDataLayout *shared_layout_ptr = new (layout_memory->Ptr()) SharedDataLayout();
 
         shared_layout_ptr->SetBlockSize<char>(SharedDataLayout::FILE_INDEX_PATH,
                                               file_index_path.length() + 1);
@@ -265,9 +271,10 @@ int main(const int argc, const char *argv[])
 
         boost::filesystem::ifstream hsgr_input_stream(hsgr_path, std::ios::binary);
 
-        FingerPrint fingerprint_loaded, fingerprint_orig;
+        FingerPrint fingerprint_valid = FingerPrint::GetValid();
+        FingerPrint fingerprint_loaded;
         hsgr_input_stream.read((char *)&fingerprint_loaded, sizeof(FingerPrint));
-        if (fingerprint_loaded.TestGraphUtil(fingerprint_orig))
+        if (fingerprint_loaded.TestGraphUtil(fingerprint_valid))
         {
             SimpleLogger().Write(logDEBUG) << "Fingerprint checked out ok";
         }
@@ -328,6 +335,13 @@ int main(const int argc, const char *argv[])
             m_timestamp.resize(25);
         }
         shared_layout_ptr->SetBlockSize<char>(SharedDataLayout::TIMESTAMP, m_timestamp.length());
+
+        // load core marker size
+        boost::filesystem::ifstream core_marker_file(core_marker_path, std::ios::binary);
+
+        uint32_t number_of_core_markers = 0;
+        core_marker_file.read((char *)&number_of_core_markers, sizeof(uint32_t));
+        shared_layout_ptr->SetBlockSize<unsigned>(SharedDataLayout::CORE_MARKER, number_of_core_markers);
 
         // load coordinate size
         boost::filesystem::ifstream nodes_input_stream(nodes_data_path, std::ios::binary);
@@ -508,6 +522,35 @@ int main(const int argc, const char *argv[])
             tree_node_file.read(rtree_ptr, sizeof(RTreeNode) * tree_size);
         }
         tree_node_file.close();
+
+        // load core markers
+        std::vector<char> unpacked_core_markers(number_of_core_markers);
+        core_marker_file.read((char *)unpacked_core_markers.data(), sizeof(char)*number_of_core_markers);
+
+        unsigned *core_marker_ptr = shared_layout_ptr->GetBlockPtr<unsigned, true>(
+            shared_memory_ptr, SharedDataLayout::CORE_MARKER);
+
+        for (auto i = 0u; i < number_of_core_markers; ++i)
+        {
+            BOOST_ASSERT(unpacked_core_markers[i] == 0 || unpacked_core_markers[i] == 1);
+
+            if (unpacked_core_markers[i] == 1)
+            {
+                const unsigned bucket = i / 32;
+                const unsigned offset = i % 32;
+                const unsigned value = [&]
+                {
+                    unsigned return_value = 0;
+                    if (0 != offset)
+                    {
+                        return_value = core_marker_ptr[bucket];
+                    }
+                    return return_value;
+                }();
+
+                core_marker_ptr[bucket] = (value | (1 << offset));
+            }
+        }
 
         // load the nodes of the search graph
         QueryGraph::NodeArrayEntry *graph_node_list_ptr =

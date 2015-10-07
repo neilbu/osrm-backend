@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -25,10 +25,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#ifndef QUERYEDGE_HPP_
-#define QUERYEDGE_HPP_
+#ifndef QUERYEDGE_HPP
+#define QUERYEDGE_HPP
 
 #include "../typedefs.h"
+
+#include <tuple>
 
 struct QueryEdge
 {
@@ -56,17 +58,13 @@ struct QueryEdge
     QueryEdge() : source(SPECIAL_NODEID), target(SPECIAL_NODEID) {}
 
     QueryEdge(NodeID source, NodeID target, EdgeData data)
-        : source(source), target(target), data(data)
+        : source(source), target(target), data(std::move(data))
     {
     }
 
-    bool operator<(const QueryEdge &right) const
+    bool operator<(const QueryEdge &rhs) const
     {
-        if (source != right.source)
-        {
-            return source < right.source;
-        }
-        return target < right.target;
+        return std::tie(source, target) < std::tie(rhs.source, rhs.target);
     }
 
     bool operator==(const QueryEdge &right) const
@@ -78,4 +76,4 @@ struct QueryEdge
     }
 };
 
-#endif /* QUERYEDGE_HPP_ */
+#endif // QUERYEDGE_HPP

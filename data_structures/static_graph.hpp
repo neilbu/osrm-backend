@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,8 +34,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../typedefs.h"
 
 #include <boost/assert.hpp>
-
-#include <tbb/parallel_sort.h>
 
 #include <algorithm>
 #include <limits>
@@ -89,9 +87,11 @@ template <typename EdgeDataT, bool UseSharedMemory = false> class StaticGraph
         return osrm::irange(BeginEdges(node), EndEdges(node));
     }
 
-    StaticGraph(const int nodes, std::vector<InputEdge> &graph)
+    template<typename ContainerT>
+    StaticGraph(const int nodes, const ContainerT &graph)
     {
-        tbb::parallel_sort(graph.begin(), graph.end());
+        BOOST_ASSERT(std::is_sorted(const_cast<ContainerT&>(graph).begin(), const_cast<ContainerT&>(graph).end()));
+
         number_of_nodes = nodes;
         number_of_edges = static_cast<EdgeIterator>(graph.size());
         node_array.resize(number_of_nodes + 1);
@@ -112,11 +112,10 @@ template <typename EdgeDataT, bool UseSharedMemory = false> class StaticGraph
         for (const auto node : osrm::irange(0u, number_of_nodes))
         {
             EdgeIterator e = node_array[node + 1].first_edge;
-            for (EdgeIterator i = node_array[node].first_edge; i != e; ++i)
+            for (const auto i : osrm::irange(node_array[node].first_edge, e))
             {
                 edge_array[i].target = graph[edge].target;
                 edge_array[i].data = graph[edge].data;
-                BOOST_ASSERT(edge_array[i].data.distance > 0);
                 edge++;
             }
         }
@@ -143,7 +142,7 @@ template <typename EdgeDataT, bool UseSharedMemory = false> class StaticGraph
         return NodeIterator(edge_array[e].target);
     }
 
-    inline EdgeDataT &GetEdgeData(const EdgeIterator e) { return edge_array[e].data; }
+    EdgeDataT &GetEdgeData(const EdgeIterator e) { return edge_array[e].data; }
 
     const EdgeDataT &GetEdgeData(const EdgeIterator e) const { return edge_array[e].data; }
 
@@ -159,6 +158,19 @@ template <typename EdgeDataT, bool UseSharedMemory = false> class StaticGraph
 
     // searches for a specific edge
     EdgeIterator FindEdge(const NodeIterator from, const NodeIterator to) const
+    {
+        for (const auto i : osrm::irange(BeginEdges(from), EndEdges(from)))
+        {
+            if (to == edge_array[i].target)
+            {
+                return i;
+            }
+        }
+        return SPECIAL_EDGEID;
+    }
+
+    // searches for a specific edge
+    EdgeIterator FindSmallestEdge(const NodeIterator from, const NodeIterator to) const
     {
         EdgeIterator smallest_edge = SPECIAL_EDGEID;
         EdgeWeight smallest_weight = INVALID_EDGE_WEIGHT;

@@ -389,7 +389,7 @@ namespace osmium {
 
                 RelationMeta relation_meta(offset);
 
-                int n=0;
+                int n = 0;
                 for (auto& member : m_relations_buffer.get<osmium::Relation>(offset).members()) {
                     if (static_cast<TCollector*>(this)->keep_member(relation_meta, member)) {
                         member_meta(member.type()).emplace_back(member.ref(), m_relations.size(), n);
@@ -512,7 +512,7 @@ namespace osmium {
                     double percent = static_cast<double>(size_before - size_after);
                     percent /= size_before;
                     percent *= 100;
-                    std::cerr << "PURGE (size before=" << size_before << " after=" << size_after << " purged=" << (size_before - size_after) << " / " << static_cast<int>(percent) << "%)\n";
+//                    std::cerr << "PURGE (size before=" << size_before << " after=" << size_after << " purged=" << (size_before - size_after) << " / " << static_cast<int>(percent) << "%)\n";
                     m_count_complete = 0;
                 }
             }

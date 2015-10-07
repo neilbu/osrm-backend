@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -41,8 +41,10 @@ class named_mutex;
 #include "../plugins/locate.hpp"
 #include "../plugins/nearest.hpp"
 #include "../plugins/timestamp.hpp"
+#include "../plugins/trip.hpp"
 #include "../plugins/viaroute.hpp"
 #include "../plugins/distance_matrix.hpp"
+#include "../plugins/match.hpp"
 #include "../server/data_structures/datafacade_base.hpp"
 #include "../server/data_structures/internal_datafacade.hpp"
 #include "../server/data_structures/shared_barriers.hpp"
@@ -82,9 +84,12 @@ OSRM_impl::OSRM_impl(libosrm_config &lib_config)
     RegisterPlugin(new HelloWorldPlugin());
     RegisterPlugin(new LocatePlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
     RegisterPlugin(new NearestPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
+    RegisterPlugin(new MapMatchingPlugin<BaseDataFacade<QueryEdge::EdgeData>>(
+        query_data_facade, lib_config.max_locations_map_matching));
     RegisterPlugin(new TimestampPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
     RegisterPlugin(new ViaRoutePlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
     RegisterPlugin(new DistanceMatrixPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
+    RegisterPlugin(new RoundTripPlugin<BaseDataFacade<QueryEdge::EdgeData>>(query_data_facade));
 }
 
 OSRM_impl::~OSRM_impl()
@@ -106,7 +111,7 @@ void OSRM_impl::RegisterPlugin(BasePlugin *plugin)
     plugin_map.emplace(plugin->GetDescriptor(), plugin);
 }
 
-int OSRM_impl::RunQuery(RouteParameters &route_parameters, JSON::Object &json_result)
+int OSRM_impl::RunQuery(RouteParameters &route_parameters, osrm::json::Object &json_result)
 {
     const auto &plugin_iterator = plugin_map.find(route_parameters.service);
 
@@ -174,7 +179,7 @@ OSRM::OSRM(libosrm_config &lib_config) : OSRM_pimpl_(osrm::make_unique<OSRM_impl
 
 OSRM::~OSRM() { OSRM_pimpl_.reset(); }
 
-int OSRM::RunQuery(RouteParameters &route_parameters, JSON::Object &json_result)
+int OSRM::RunQuery(RouteParameters &route_parameters, osrm::json::Object &json_result)
 {
     return OSRM_pimpl_->RunQuery(route_parameters, json_result);
 }

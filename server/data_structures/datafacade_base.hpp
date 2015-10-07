@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -43,13 +43,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <string>
 
-typedef osrm::range<EdgeID> EdgeRange;
+using EdgeRange = osrm::range<EdgeID>;
 
 template <class EdgeDataT> class BaseDataFacade
 {
   public:
-    typedef EdgeBasedNode RTreeLeaf;
-    typedef EdgeDataT EdgeData;
+    using RTreeLeaf = EdgeBasedNode;
+    using EdgeData = EdgeDataT;
     BaseDataFacade() {}
     virtual ~BaseDataFacade() {}
 
@@ -104,19 +104,18 @@ template <class EdgeDataT> class BaseDataFacade
     virtual bool
     IncrementalFindPhantomNodeForCoordinate(const FixedPointCoordinate &input_coordinate,
                                             PhantomNode &resulting_phantom_node) = 0;
+    virtual bool IncrementalFindPhantomNodeForCoordinateWithMaxDistance(
+        const FixedPointCoordinate &input_coordinate,
+        std::vector<std::pair<PhantomNode, double>> &resulting_phantom_node_vector,
+        const double max_distance) = 0;
 
     virtual unsigned GetCheckSum() const = 0;
 
+    virtual bool IsCoreNode(const NodeID id) const = 0;
+
     virtual unsigned GetNameIndexFromEdgeID(const unsigned id) const = 0;
 
-    virtual void GetName(const unsigned name_id, std::string &result) const = 0;
-
-    std::string GetEscapedNameForNameID(const unsigned name_id) const
-    {
-        std::string temporary_string;
-        GetName(name_id, temporary_string);
-        return EscapeJSONString(temporary_string);
-    }
+    virtual std::string get_name_for_id(const unsigned name_id) const = 0;
 
     virtual std::string GetTimestamp() const = 0;
 };

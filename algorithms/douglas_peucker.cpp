@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -99,8 +99,8 @@ void DouglasPeucker::Run(RandomAccessIt begin, RandomAccessIt end, const unsigne
 
     {
         BOOST_ASSERT_MSG(zoom_level < DOUGLAS_PEUCKER_THRESHOLDS.size(), "unsupported zoom level");
-        RandomAccessIt left_border = begin;
-        RandomAccessIt right_border = std::next(begin);
+        auto left_border = begin;
+        auto right_border = std::next(begin);
         // Sweep over array and identify those ranges that need to be checked
         do
         {

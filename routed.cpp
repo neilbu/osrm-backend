@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -74,10 +74,13 @@ int main(int argc, const char *argv[])
         int ip_port, requested_thread_num;
 
         libosrm_config lib_config;
+        // make the behaviour of routed backward compatible
+        lib_config.use_shared_memory = false;
 
         const unsigned init_result = GenerateServerProgramOptions(
             argc, argv, lib_config.server_paths, ip_address, ip_port, requested_thread_num,
-            lib_config.use_shared_memory, trial_run, lib_config.max_locations_distance_table);
+            lib_config.use_shared_memory, trial_run, lib_config.max_locations_distance_table,
+            lib_config.max_locations_map_matching);
         if (init_result == INIT_OK_DO_NOT_START_ENGINE)
         {
             return 0;
@@ -133,12 +136,12 @@ int main(int argc, const char *argv[])
 
 #ifndef _WIN32
             sigset_t wait_mask;
-            pthread_sigmask(SIG_SETMASK, &old_mask, 0);
+            pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
             sigemptyset(&wait_mask);
             sigaddset(&wait_mask, SIGINT);
             sigaddset(&wait_mask, SIGQUIT);
             sigaddset(&wait_mask, SIGTERM);
-            pthread_sigmask(SIG_BLOCK, &wait_mask, 0);
+            pthread_sigmask(SIG_BLOCK, &wait_mask, nullptr);
             SimpleLogger().Write() << "running and waiting for requests";
             sigwait(&wait_mask, &sig);
 #else

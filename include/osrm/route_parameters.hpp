@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2013, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -25,8 +25,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#ifndef ROUTE_PARAMETERS_H
-#define ROUTE_PARAMETERS_H
+#ifndef ROUTE_PARAMETERS_HPP
+#define ROUTE_PARAMETERS_HPP
 
 #include <osrm/coordinate.hpp>
 
@@ -49,6 +49,12 @@ struct RouteParameters
 
     void setAllUTurns(const bool flag);
 
+    void setClassify(const bool classify);
+
+    void setMatchingBeta(const double beta);
+
+    void setGPSPrecision(const double precision);
+
     void setDeprecatedAPIFlag(const std::string &);
 
     void setChecksum(const unsigned check_sum);
@@ -63,13 +69,17 @@ struct RouteParameters
 
     void addHint(const std::string &hint);
 
+    void addTimestamp(const unsigned timestamp);
+
     void setLanguage(const std::string &language);
 
     void setGeometryFlag(const bool flag);
 
     void setCompressionFlag(const bool flag);
 
-    void addCoordinate(const boost::fusion::vector<double, double> &coordinates);
+    void addCoordinate(const boost::fusion::vector<double, double> &received_coordinates);
+
+    void getCoordinatesFromGeometry(const std::string &geometry_string);
 
     short zoom_level;
     bool print_instructions;
@@ -78,6 +88,9 @@ struct RouteParameters
     bool compression;
     bool deprecatedAPI;
     bool uturn_default;
+    bool classify;
+    double matching_beta;
+    double gps_precision;
     unsigned check_sum;
     short num_results;
     std::string service;
@@ -85,8 +98,9 @@ struct RouteParameters
     std::string jsonp_parameter;
     std::string language;
     std::vector<std::string> hints;
+    std::vector<unsigned> timestamps;
     std::vector<bool> uturns;
     std::vector<FixedPointCoordinate> coordinates;
 };
 
-#endif // ROUTE_PARAMETERS_H
+#endif // ROUTE_PARAMETERS_HPP

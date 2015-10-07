@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -48,6 +48,7 @@ struct ExtractorConfig
 
     std::string output_file_name;
     std::string restriction_file_name;
+    std::string names_file_name;
     std::string timestamp_file_name;
 
     unsigned requested_num_threads;

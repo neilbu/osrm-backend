@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,8 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "extractor_options.hpp"
 
-struct extractor
+class extractor
 {
-    int run(const ExtractorConfig &extractor_config);
+public:
+  extractor(ExtractorConfig extractor_config) : config(std::move(extractor_config)) {}
+    int run();
+private:
+   ExtractorConfig config;
 };
 #endif /* EXTRACTOR_HPP */

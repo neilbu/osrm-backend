@@ -33,11 +33,11 @@ DEALINGS IN THE SOFTWARE.
 
 */
 
+#include <cstdint>
 #include <cstdlib>
 #include <iosfwd>
 
 #include <osmium/memory/item.hpp>
-#include <osmium/osm/item_type.hpp>
 #include <osmium/osm/location.hpp>
 #include <osmium/osm/types.hpp>
 
@@ -54,7 +54,7 @@ namespace osmium {
 
     public:
 
-        NodeRef(const osmium::object_id_type ref=0, const osmium::Location& location=Location()) noexcept :
+        NodeRef(const osmium::object_id_type ref = 0, const osmium::Location& location = Location()) noexcept :
             m_ref(ref),
             m_location(location) {
         }

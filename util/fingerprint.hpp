@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -29,23 +29,22 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define FINGERPRINT_H
 
 #include <boost/uuid/uuid.hpp>
+#include <type_traits>
 
 // implements a singleton, i.e. there is one and only one conviguration object
 class FingerPrint
 {
   public:
-    FingerPrint();
-    FingerPrint(const FingerPrint &) = delete;
-    ~FingerPrint();
+    static FingerPrint GetValid();
     const boost::uuids::uuid &GetFingerPrint() const;
-    bool IsMagicNumberOK() const;
+    bool IsMagicNumberOK(const FingerPrint &other) const;
     bool TestGraphUtil(const FingerPrint &other) const;
     bool TestPrepare(const FingerPrint &other) const;
     bool TestRTree(const FingerPrint &other) const;
     bool TestQueryObjects(const FingerPrint &other) const;
 
   private:
-    const unsigned magic_number;
+    unsigned magic_number;
     char md5_prepare[33];
     char md5_tree[33];
     char md5_graph[33];
@@ -54,6 +53,10 @@ class FingerPrint
     // initialize to {6ba7b810-9dad-11d1-80b4-00c04fd430c8}
     boost::uuids::uuid named_uuid;
     bool has_64_bits;
+
 };
+
+static_assert(std::is_trivial<FingerPrint>::value, "FingerPrint needs to be trivial.");
+
 
 #endif /* FingerPrint_H */

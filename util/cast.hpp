@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2013, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -109,7 +109,7 @@ struct cast
     }
 
     // source: http://tinodidriksen.com/2011/05/28/cpp-convert-string-to-double-speed/
-    static double string_to_double(const char *p)
+    static double string_to_double(const char *p) noexcept
     {
         double r = 0.0;
         bool neg = false;
@@ -149,7 +149,7 @@ struct cast
         static int floatfield(T) { return boost::spirit::karma::real_policies<T>::fmtflags::fixed; }
         static unsigned int precision(T) { return 6; }
     };
-    typedef boost::spirit::karma::real_generator<double, scientific_policy<double>> science_type;
+    using science_type = boost::spirit::karma::real_generator<double, scientific_policy<double>>;
 
     static std::string double_fixed_to_string(const double value)
     {

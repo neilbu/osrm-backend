@@ -4,6 +4,25 @@ Feature: Avoid weird loops caused by rounding errors
     Background:
         Given the profile "testbot"
 
+    Scenario: Weired sidestreet loops
+        Given the node map
+            | a | 1 | b | 2 | c | 3 | d |
+            |   |   |   |   |   |   |   |
+            | e |   | f |   | g |   | h |
+
+       And the ways
+            | nodes  |
+            | aefghd |
+            | abcd   |
+            | bf     |
+            | cg     |
+
+       When I route I should get
+           | waypoints | route     | turns                |
+           | a,1,d     | abcd,abcd | head,via,destination |
+           | a,2,d     | abcd,abcd | head,via,destination |
+           | a,3,d     | abcd,abcd | head,via,destination |
+
     Scenario: Avoid weird loops 1
         Given the node locations
             | node | lat        | lon        |
@@ -64,13 +83,13 @@ Feature: Avoid weird loops caused by rounding errors
             |   | d |   |
 
         And the ways
-            | nodes | highway   |
-            | ab    | primary   |
-            | bc    | primary   |
-            | cd    | primary   |
-            | be    | secondary |
-            | ef    | secondary |
-            | cf    | secondary |
+            | nodes | highway     |
+            | ab    | residential |
+            | bc    | residential |
+            | cd    | residential |
+            | be    | primary     |
+            | ef    | primary     |
+            | cf    | primary     |
 
         When I route I should get
             | waypoints | route             | turns                                      |

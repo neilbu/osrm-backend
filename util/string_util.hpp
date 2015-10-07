@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2013, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -41,32 +41,43 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // work with negative values to prevent overflowing when taking -value
 template <int length, int precision> static inline char *printInt(char *buffer, int value)
 {
-    bool minus = true;
-    if (value > 0)
+    static_assert(length > 0, "length must be positive");
+    static_assert(precision > 0, "precision must be positive");
+
+    const bool minus = [&value]
     {
-        minus = false;
-        value = -value;
-    }
+        if (value >= 0)
+        {
+            value = -value;
+            return false;
+        }
+        return true;
+    }();
+
     buffer += length - 1;
-    for (int i = 0; i < precision; i++)
+    for (int i = 0; i < precision; ++i)
     {
         *buffer = '0' - (value % 10);
         value /= 10;
-        buffer--;
+        --buffer;
     }
     *buffer = '.';
-    buffer--;
-    for (int i = precision + 1; i < length; i++)
+    --buffer;
+
+    for (int i = precision + 1; i < length; ++i)
     {
         *buffer = '0' - (value % 10);
         value /= 10;
         if (value == 0)
+        {
             break;
-        buffer--;
+        }
+        --buffer;
     }
+
     if (minus)
     {
-        buffer--;
+        --buffer;
         *buffer = '-';
     }
     return buffer;
@@ -77,13 +88,14 @@ inline void replaceAll(std::string &s, const std::string &sub, const std::string
     boost::replace_all(s, sub, other);
 }
 
-inline std::string EscapeJSONString(const std::string &input)
+inline std::string escape_JSON(const std::string &input)
 {
+    // escape and skip reallocations if possible
     std::string output;
-    output.reserve(input.size());
-    for (auto iter = input.begin(); iter != input.end(); ++iter)
+    output.reserve(input.size() + 4); // +4 assumes two backslashes on avg
+    for (const char letter : input)
     {
-        switch (iter[0])
+        switch (letter)
         {
         case '\\':
             output += "\\\\";
@@ -110,23 +122,20 @@ inline std::string EscapeJSONString(const std::string &input)
             output += "\\t";
             break;
         default:
-            output += *iter;
+            output.append(1, letter);
             break;
         }
     }
     return output;
 }
 
-static std::string originals[] = {"&", "\"", "<", ">", "'", "[", "]", "\\"};
-static std::string entities[] = {
-    "&amp;", "&quot;", "&lt;", "&gt;", "&#39;", "&91;", "&93;", " &#92;"};
-
 inline std::size_t URIDecode(const std::string &input, std::string &output)
 {
-    auto src_iter = input.begin();
+    auto src_iter = std::begin(input);
+    const auto src_end = std::end(input);
     output.resize(input.size() + 1);
     std::size_t decoded_length = 0;
-    for (decoded_length = 0; src_iter != input.end(); ++decoded_length)
+    for (decoded_length = 0; src_iter != src_end; ++decoded_length)
     {
         if (src_iter[0] == '%' && src_iter[1] && src_iter[2] && isxdigit(src_iter[1]) &&
             isxdigit(src_iter[2]))

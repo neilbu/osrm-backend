@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -59,6 +59,8 @@ inline void populate_base_path(ServerPaths &server_paths)
         BOOST_ASSERT(server_paths.find("hsgrdata") != server_paths.end());
         server_paths["nodesdata"] = base_string + ".nodes";
         BOOST_ASSERT(server_paths.find("nodesdata") != server_paths.end());
+        server_paths["coredata"] = base_string + ".core";
+        BOOST_ASSERT(server_paths.find("coredata") != server_paths.end());
         server_paths["edgesdata"] = base_string + ".edges";
         BOOST_ASSERT(server_paths.find("edgesdata") != server_paths.end());
         server_paths["geometries"] = base_string + ".geometry";
@@ -151,7 +153,8 @@ inline unsigned GenerateServerProgramOptions(const int argc,
                                              int &requested_num_threads,
                                              bool &use_shared_memory,
                                              bool &trial,
-                                             int &max_locations_distance_table)
+                                             int &max_locations_distance_table,
+                                             int &max_locations_map_matching)
 {
     // declare a group of options that will be allowed only on command line
     boost::program_options::options_description generic_options("Options");
@@ -192,7 +195,10 @@ inline unsigned GenerateServerProgramOptions(const int argc,
         "Load data from shared memory")(
         "max-table-size,m",
         boost::program_options::value<int>(&max_locations_distance_table)->default_value(100),
-        "Max. locations supported in distance table query");
+        "Max. locations supported in distance table query")(
+        "max-matching-size,m",
+        boost::program_options::value<int>(&max_locations_map_matching)->default_value(2),
+        "Max. locations supported in map matching query");
 
     // hidden options, will be allowed both on command line and in config
     // file, but will not be shown to the user
@@ -239,7 +245,7 @@ inline unsigned GenerateServerProgramOptions(const int argc,
     boost::program_options::notify(option_variables);
 
     // parse config file
-    ServerPaths::iterator path_iterator = paths.find("config");
+    auto path_iterator = paths.find("config");
     if (path_iterator != paths.end() && boost::filesystem::is_regular_file(path_iterator->second) &&
         !option_variables.count("base"))
     {
@@ -268,6 +274,10 @@ inline unsigned GenerateServerProgramOptions(const int argc,
     if (1 > max_locations_distance_table)
     {
         throw osrm::exception("Max location for distance table must be a positive number");
+    }
+    if (2 > max_locations_map_matching)
+    {
+        throw osrm::exception("Max location for map matching must be at least two");
     }
 
     SimpleLogger().Write() << visible_options;

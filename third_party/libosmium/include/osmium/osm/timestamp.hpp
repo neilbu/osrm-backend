@@ -39,9 +39,9 @@ DEALINGS IN THE SOFTWARE.
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <time.h>
 
 #include <osmium/util/compatibility.hpp>
+#include <osmium/util/minmax.hpp> // IWYU pragma: keep
 
 namespace osmium {
 
@@ -113,6 +113,10 @@ namespace osmium {
             return static_cast<time_t>(m_timestamp);
         }
 
+        explicit constexpr operator uint32_t() const noexcept {
+            return m_timestamp;
+        }
+
         template <typename T>
         void operator+=(T time_difference) noexcept {
             m_timestamp += time_difference;
@@ -164,6 +168,16 @@ namespace osmium {
     inline std::basic_ostream<TChar, TTraits>& operator<<(std::basic_ostream<TChar, TTraits>& out, Timestamp timestamp) {
         out << timestamp.to_iso();
         return out;
+    }
+
+    template <>
+    inline osmium::Timestamp min_op_start_value<osmium::Timestamp>() {
+        return end_of_time();
+    }
+
+    template <>
+    inline osmium::Timestamp max_op_start_value<osmium::Timestamp>() {
+        return start_of_time();
     }
 
 } // namespace osmium

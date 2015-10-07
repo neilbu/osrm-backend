@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,7 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 double ComputeAngle::OfThreeFixedPointCoordinates(const FixedPointCoordinate &first,
                                                   const FixedPointCoordinate &second,
-                                                  const FixedPointCoordinate &third)
+                                                  const FixedPointCoordinate &third) noexcept
 {
     const double v1x = (first.lon - second.lon) / COORDINATE_PRECISION;
     const double v1y = mercator::lat2y(first.lat / COORDINATE_PRECISION) -

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -27,7 +27,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "restriction_parser.hpp"
 #include "extraction_way.hpp"
-#include "scripting_environment.hpp"
 
 #include "../data_structures/external_memory_node.hpp"
 #include "../util/lua_util.hpp"
@@ -36,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/regex.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/ref.hpp>
 #include <boost/regex.hpp>
 
@@ -45,15 +45,14 @@ namespace
 {
 int lua_error_callback(lua_State *lua_state)
 {
-    luabind::object error_msg(luabind::from_stack(lua_state, -1));
+    std::string error_msg = lua_tostring(lua_state, -1);
     std::ostringstream error_stream;
     error_stream << error_msg;
     throw osrm::exception("ERROR occured in profile script:\n" + error_stream.str());
 }
 }
 
-RestrictionParser::RestrictionParser(lua_State *lua_state)
-    : /*lua_state(scripting_environment.getLuaState()),*/ use_turn_restrictions(true)
+RestrictionParser::RestrictionParser(lua_State *lua_state) : use_turn_restrictions(true)
 {
     ReadUseRestrictionsSetting(lua_state);
 
@@ -103,6 +102,13 @@ void RestrictionParser::ReadRestrictionExceptions(lua_State *lua_state)
     }
 }
 
+/**
+ * Tries to parse an relation as turn restriction. This can fail for a number of
+ * reasons, this the return type is a mapbox::util::optional<>.
+ *
+ * Some restrictions can also be ignored: See the ```get_exceptions``` function
+ * in the corresponding profile.
+ */
 mapbox::util::optional<InputRestrictionContainer>
 RestrictionParser::TryParse(const osmium::Relation &relation) const
 {
@@ -135,16 +141,30 @@ RestrictionParser::TryParse(const osmium::Relation &relation) const
 
     bool is_only_restriction = false;
 
-    for (auto iter = fi_begin; iter != fi_end; ++iter)
+    for (; fi_begin != fi_end; ++fi_begin)
     {
-        if (std::string("restriction") == iter->key() ||
-            std::string("restriction::hgv") == iter->key())
-        {
-            const std::string restriction_value(iter->value());
+        const std::string key(fi_begin->key());
+        const std::string value(fi_begin->value());
 
-            if (restriction_value.find("only_") == 0)
+        if (value.find("only_") == 0)
+        {
+            is_only_restriction = true;
+        }
+
+        // if the "restriction*" key is longer than 11 chars, it is a conditional exception (i.e.
+        // "restriction:<transportation_type>")
+        if (key.size() > 11)
+        {
+            const auto ex_suffix = [&](const std::string &exception)
             {
-                is_only_restriction = true;
+                return boost::algorithm::ends_with(key, exception);
+            };
+            bool is_actually_restricted =
+                std::any_of(begin(restriction_exceptions), end(restriction_exceptions), ex_suffix);
+
+            if (!is_actually_restricted)
+            {
+                return mapbox::util::optional<InputRestrictionContainer>();
             }
         }
     }

@@ -110,15 +110,11 @@ endif()
 #----------------------------------------------------------------------
 # Component 'pbf'
 if(Osmium_USE_PBF)
-    find_package(OSMPBF)
-    find_package(Protobuf)
     find_package(ZLIB)
     find_package(Threads)
 
-    if(OSMPBF_FOUND AND PROTOBUF_FOUND AND ZLIB_FOUND AND Threads_FOUND)
+    if(ZLIB_FOUND AND Threads_FOUND)
         list(APPEND OSMIUM_PBF_LIBRARIES
-            ${OSMPBF_LIBRARIES}
-            ${PROTOBUF_LITE_LIBRARY}
             ${ZLIB_LIBRARIES}
             ${CMAKE_THREAD_LIBS_INIT}
         )
@@ -126,8 +122,6 @@ if(Osmium_USE_PBF)
             list(APPEND OSMIUM_PBF_LIBRARIES ws2_32)
         endif()
         list(APPEND OSMIUM_INCLUDE_DIRS
-            ${OSMPBF_INCLUDE_DIRS}
-            ${PROTOBUF_INCLUDE_DIR}
             ${ZLIB_INCLUDE_DIR}
         )
     else()
@@ -224,8 +218,31 @@ if(Osmium_USE_SPARSEHASH)
     find_path(SPARSEHASH_INCLUDE_DIR google/sparsetable)
 
     if(SPARSEHASH_INCLUDE_DIR)
-        set(SPARSEHASH_FOUND 1)
-        list(APPEND OSMIUM_INCLUDE_DIRS ${SPARSEHASH_INCLUDE_DIR})
+        # Find size of sparsetable::size_type. This does not work on older
+        # CMake versions because they can do this check only in C, not in C++.
+        include(CheckTypeSize)
+        set(CMAKE_REQUIRED_INCLUDES ${SPARSEHASH_INCLUDE_DIR})
+        set(CMAKE_EXTRA_INCLUDE_FILES "google/sparsetable")
+        check_type_size("google::sparsetable<int>::size_type" SPARSETABLE_SIZE_TYPE LANGUAGE CXX)
+        set(CMAKE_EXTRA_INCLUDE_FILES)
+        set(CMAKE_REQUIRED_INCLUDES)
+
+        # Falling back to checking size_t if google::sparsetable<int>::size_type
+        # could not be checked.
+        if(SPARSETABLE_SIZE_TYPE STREQUAL "")
+            check_type_size("void*" VOID_PTR_SIZE)
+            set(SPARSETABLE_SIZE_TYPE ${VOID_PTR_SIZE})
+        endif()
+
+        # Sparsetable::size_type must be at least 8 bytes (64bit), otherwise
+        # OSM object IDs will not fit.
+        if(SPARSETABLE_SIZE_TYPE GREATER 7)
+            set(SPARSEHASH_FOUND 1)
+            add_definitions(-DOSMIUM_WITH_SPARSEHASH=${SPARSEHASH_FOUND})
+            list(APPEND OSMIUM_INCLUDE_DIRS ${SPARSEHASH_INCLUDE_DIR})
+        else()
+            message(WARNING "Osmium: Disabled Google SparseHash library on 32bit system (size_type=${SPARSETABLE_SIZE_TYPE}).")
+        endif()
     else()
         set(_missing_libraries 1)
         message(WARNING "Osmium: Google SparseHash library is required but not found, please install it or configure the paths.")
@@ -270,11 +287,19 @@ add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64)
 
 if(MSVC)
     add_definitions(-wd4996)
+
+    # Disable warning C4068: "unknown pragma" because we want it to ignore
+    # pragmas for other compilers.
     add_definitions(-wd4068)
 
     # Disable warning C4715: "not all control paths return a value" because
     # it generates too many false positives.
     add_definitions(-wd4715)
+
+    # Disable warning C4351: new behavior: elements of array '...' will be
+    # default initialized. The new behaviour is correct and we don't support
+    # old compilers anyway.
+    add_definitions(-wd4351)
 
     add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS)
 endif()
@@ -294,7 +319,7 @@ endif()
 if(MSVC)
     set(OSMIUM_WARNING_OPTIONS "/W3 /wd4514" CACHE STRING "Recommended warning options for libosmium")
 else()
-    set(OSMIUM_WARNING_OPTIONS "-Wall -Wextra -pedantic -Wredundant-decls -Wdisabled-optimization -Wctor-dtor-privacy -Wnon-virtual-dtor -Woverloaded-virtual -Wsign-promo -Wold-style-cast -Wno-return-type" CACHE STRING "Recommended warning options for libosmium")
+    set(OSMIUM_WARNING_OPTIONS "-Wall -Wextra -pedantic -Wredundant-decls -Wdisabled-optimization -Wctor-dtor-privacy -Wnon-virtual-dtor -Woverloaded-virtual -Wsign-promo -Wold-style-cast" CACHE STRING "Recommended warning options for libosmium")
 endif()
 
 set(OSMIUM_DRACONIC_CLANG_OPTIONS "-Wdocumentation -Wunused-exception-parameter -Wmissing-declarations -Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-unused-macros -Wno-exit-time-destructors -Wno-global-constructors -Wno-padded -Wno-switch-enum -Wno-missing-prototypes -Wno-weak-vtables -Wno-cast-align -Wno-float-equal")

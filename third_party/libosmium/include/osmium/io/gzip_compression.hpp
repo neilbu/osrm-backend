@@ -76,7 +76,7 @@ namespace osmium {
 
         namespace detail {
 
-            OSMIUM_NORETURN inline void throw_gzip_error(gzFile gzfile, const char* msg, int zlib_error=0) {
+            OSMIUM_NORETURN inline void throw_gzip_error(gzFile gzfile, const char* msg, int zlib_error = 0) {
                 std::string error("gzip error: ");
                 error += msg;
                 error += ": ";
@@ -231,11 +231,16 @@ namespace osmium {
 
         namespace {
 
+// we want the register_compression() function to run, setting the variable
+// is only a side-effect, it will never be used
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
             const bool registered_gzip_compression = osmium::io::CompressionFactory::instance().register_compression(osmium::io::file_compression::gzip,
                 [](int fd) { return new osmium::io::GzipCompressor(fd); },
                 [](int fd) { return new osmium::io::GzipDecompressor(fd); },
                 [](const char* buffer, size_t size) { return new osmium::io::GzipBufferDecompressor(buffer, size); }
             );
+#pragma GCC diagnostic pop
 
         } // anonymous namespace
 

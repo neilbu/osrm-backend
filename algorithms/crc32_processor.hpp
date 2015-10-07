@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -116,7 +116,7 @@ class IteratorbasedCRC32
         return ecx;
     }
 
-#if defined(__MINGW64__) || defined(_MSC_VER)
+#if defined(__MINGW64__) || defined(_MSC_VER) || !defined(__x86_64__)
     inline void
     __get_cpuid(int param, unsigned *eax, unsigned *ebx, unsigned *ecx, unsigned *edx) const
     {

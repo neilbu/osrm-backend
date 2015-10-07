@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -41,20 +41,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../../util/simple_logger.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 
 template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<EdgeDataT>
 {
 
   private:
-    typedef EdgeDataT EdgeData;
-    typedef BaseDataFacade<EdgeData> super;
-    typedef StaticGraph<EdgeData, true> QueryGraph;
-    typedef typename StaticGraph<EdgeData, true>::NodeArrayEntry GraphNode;
-    typedef typename StaticGraph<EdgeData, true>::EdgeArrayEntry GraphEdge;
-    typedef typename RangeTable<16, true>::BlockT NameIndexBlock;
-    typedef typename QueryGraph::InputEdge InputEdge;
-    typedef typename super::RTreeLeaf RTreeLeaf;
+    using EdgeData = EdgeDataT;
+    using super = BaseDataFacade<EdgeData>;
+    using QueryGraph = StaticGraph<EdgeData, true>;
+    using GraphNode = typename StaticGraph<EdgeData, true>::NodeArrayEntry;
+    using GraphEdge = typename StaticGraph<EdgeData, true>::EdgeArrayEntry;
+    using NameIndexBlock = typename RangeTable<16, true>::BlockT;
+    using InputEdge = typename QueryGraph::InputEdge;
+    using RTreeLeaf = typename super::RTreeLeaf;
     using SharedRTree = StaticRTree<RTreeLeaf, ShM<FixedPointCoordinate, true>::vector, true>;
     using TimeStampedRTreePair = std::pair<unsigned, std::shared_ptr<SharedRTree>>;
     using RTreeNode = typename SharedRTree::TreeNode;
@@ -83,6 +84,7 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
     ShM<bool, true>::vector m_edge_is_compressed;
     ShM<unsigned, true>::vector m_geometry_indices;
     ShM<unsigned, true>::vector m_geometry_list;
+    ShM<bool, true>::vector m_is_core_node;
 
     boost::thread_specific_ptr<std::pair<unsigned, std::shared_ptr<SharedRTree>>> m_static_rtree;
     boost::filesystem::path file_index_path;
@@ -192,6 +194,21 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
         m_names_char_list.swap(names_char_list);
     }
 
+    void LoadCoreInformation()
+    {
+        if (data_layout->num_entries[SharedDataLayout::CORE_MARKER] <= 0)
+        {
+            return;
+        }
+
+        unsigned *core_marker_ptr = data_layout->GetBlockPtr<unsigned>(
+            shared_memory, SharedDataLayout::CORE_MARKER);
+        typename ShM<bool, true>::vector is_core_node(
+            core_marker_ptr,
+            data_layout->num_entries[SharedDataLayout::CORE_MARKER]);
+        m_is_core_node.swap(is_core_node);
+    }
+
     void LoadGeometries()
     {
         unsigned *geometries_compressed_ptr = data_layout->GetBlockPtr<unsigned>(
@@ -267,6 +284,7 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
             LoadTimestamp();
             LoadViaNodeList();
             LoadNames();
+            LoadCoreInformation();
 
             data_layout->PrintInformation();
 
@@ -385,6 +403,7 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
             BOOST_ASSERT(!resulting_phantom_node_vector.empty());
             resulting_phantom_node = resulting_phantom_node_vector.front();
         }
+
         return result;
     }
 
@@ -402,6 +421,20 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
             input_coordinate, resulting_phantom_node_vector, number_of_results);
     }
 
+    bool IncrementalFindPhantomNodeForCoordinateWithMaxDistance(
+        const FixedPointCoordinate &input_coordinate,
+        std::vector<std::pair<PhantomNode, double>> &resulting_phantom_node_vector,
+        const double max_distance) override final
+    {
+        if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
+        {
+            LoadRTree();
+        }
+
+        return m_static_rtree->second->IncrementalFindPhantomNodeForCoordinateWithDistance(
+            input_coordinate, resulting_phantom_node_vector, max_distance);
+    }
+
     unsigned GetCheckSum() const override final { return m_check_sum; }
 
     unsigned GetNameIndexFromEdgeID(const unsigned id) const override final
@@ -409,22 +442,33 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
         return m_name_ID_list.at(id);
     };
 
-    void GetName(const unsigned name_id, std::string &result) const override final
+    std::string get_name_for_id(const unsigned name_id) const override final
     {
-        if (UINT_MAX == name_id)
+        if (std::numeric_limits<unsigned>::max() == name_id)
         {
-            result = "";
-            return;
+            return "";
         }
         auto range = m_name_table->GetRange(name_id);
 
-        result.clear();
+        std::string result;
+        result.reserve(range.size());
         if (range.begin() != range.end())
         {
             result.resize(range.back() - range.front() + 1);
             std::copy(m_names_char_list.begin() + range.front(),
                       m_names_char_list.begin() + range.back() + 1, result.begin());
         }
+        return result;
+    }
+
+    bool IsCoreNode(const NodeID id) const override final
+    {
+        if (m_is_core_node.size() > 0)
+        {
+            return m_is_core_node.at(id);
+        }
+
+        return false;
     }
 
     std::string GetTimestamp() const override final { return m_timestamp; }

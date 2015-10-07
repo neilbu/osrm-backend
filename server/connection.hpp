@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -87,6 +87,7 @@ class Connection : public std::enable_shared_from_this<Connection>
     boost::array<char, 8192> incoming_data_buffer;
     request current_request;
     reply current_reply;
+    std::vector<char> compressed_output;
 };
 
 } // namespace http

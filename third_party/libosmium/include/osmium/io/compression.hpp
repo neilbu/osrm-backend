@@ -75,7 +75,7 @@ namespace osmium {
 
         public:
 
-            static constexpr size_t input_buffer_size = 256 * 1024;
+            static constexpr unsigned int input_buffer_size = 1024 * 1024;
 
             Decompressor() = default;
 
@@ -245,11 +245,11 @@ namespace osmium {
                     }
                 } else {
                     buffer.resize(osmium::io::Decompressor::input_buffer_size);
-                    ssize_t nread = ::read(m_fd, const_cast<char*>(buffer.data()), buffer.size());
+                    auto nread = ::read(m_fd, const_cast<char*>(buffer.data()), osmium::io::Decompressor::input_buffer_size);
                     if (nread < 0) {
                         throw std::system_error(errno, std::system_category(), "Read failed");
                     }
-                    buffer.resize(static_cast<size_t>(nread));
+                    buffer.resize(nread);
                 }
 
                 return buffer;
@@ -266,11 +266,16 @@ namespace osmium {
 
         namespace {
 
+// we want the register_compression() function to run, setting the variable
+// is only a side-effect, it will never be used
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
             const bool registered_no_compression = osmium::io::CompressionFactory::instance().register_compression(osmium::io::file_compression::none,
                 [](int fd) { return new osmium::io::NoCompressor(fd); },
                 [](int fd) { return new osmium::io::NoDecompressor(fd); },
                 [](const char* buffer, size_t size) { return new osmium::io::NoDecompressor(buffer, size); }
             );
+#pragma GCC diagnostic pop
 
         } // anonymous namespace
 

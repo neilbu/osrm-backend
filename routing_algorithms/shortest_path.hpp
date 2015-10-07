@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -36,9 +36,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../typedefs.h"
 
 template <class DataFacadeT>
-class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
+class ShortestPathRouting final
+    : public BasicRoutingInterface<DataFacadeT, ShortestPathRouting<DataFacadeT>>
 {
-    using super = BasicRoutingInterface<DataFacadeT>;
+    using super = BasicRoutingInterface<DataFacadeT, ShortestPathRouting<DataFacadeT>>;
     using QueryHeap = SearchEngineData::QueryHeap;
     SearchEngineData &engine_working_data;
 
@@ -70,10 +71,10 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
         engine_working_data.InitializeOrClearThirdThreadLocalStorage(
             super::facade->GetNumberOfNodes());
 
-        QueryHeap &forward_heap1 = *(engine_working_data.forwardHeap);
-        QueryHeap &reverse_heap1 = *(engine_working_data.backwardHeap);
-        QueryHeap &forward_heap2 = *(engine_working_data.forwardHeap2);
-        QueryHeap &reverse_heap2 = *(engine_working_data.backwardHeap2);
+        QueryHeap &forward_heap1 = *(engine_working_data.forward_heap_1);
+        QueryHeap &reverse_heap1 = *(engine_working_data.reverse_heap_1);
+        QueryHeap &forward_heap2 = *(engine_working_data.forward_heap_2);
+        QueryHeap &reverse_heap2 = *(engine_working_data.reverse_heap_2);
 
         std::size_t current_leg = 0;
         // Get distance to next pair of target nodes.
@@ -91,7 +92,9 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
 
             const bool allow_u_turn = current_leg > 0 && uturn_indicators.size() > current_leg &&
                                       uturn_indicators[current_leg - 1];
-            EdgeWeight min_edge_offset = 0;
+            const EdgeWeight min_edge_offset =
+                std::min(-phantom_node_pair.source_phantom.GetForwardWeightPlusOffset(),
+                         -phantom_node_pair.source_phantom.GetReverseWeightPlusOffset());
 
             // insert new starting nodes into forward heap, adjusted by previous distances.
             if ((allow_u_turn || search_from_1st_node) &&
@@ -99,58 +102,32 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
             {
                 forward_heap1.Insert(
                     phantom_node_pair.source_phantom.forward_node_id,
-                    (allow_u_turn ? 0 : distance1) -
-                        phantom_node_pair.source_phantom.GetForwardWeightPlusOffset(),
+                    -phantom_node_pair.source_phantom.GetForwardWeightPlusOffset(),
                     phantom_node_pair.source_phantom.forward_node_id);
-                min_edge_offset =
-                    std::min(min_edge_offset,
-                             (allow_u_turn ? 0 : distance1) -
-                                 phantom_node_pair.source_phantom.GetForwardWeightPlusOffset());
                 // SimpleLogger().Write(logDEBUG) << "fwd-a2 insert: " <<
-                // phantom_node_pair.source_phantom.forward_node_id << ", w: " << (allow_u_turn ? 0
-                // : distance1) - phantom_node_pair.source_phantom.GetForwardWeightPlusOffset();
+                // phantom_node_pair.source_phantom.forward_node_id << ", w: " << -phantom_node_pair.source_phantom.GetForwardWeightPlusOffset();
                 forward_heap2.Insert(
                     phantom_node_pair.source_phantom.forward_node_id,
-                    (allow_u_turn ? 0 : distance1) -
-                        phantom_node_pair.source_phantom.GetForwardWeightPlusOffset(),
+                    -phantom_node_pair.source_phantom.GetForwardWeightPlusOffset(),
                     phantom_node_pair.source_phantom.forward_node_id);
-                min_edge_offset =
-                    std::min(min_edge_offset,
-                             (allow_u_turn ? 0 : distance1) -
-                                 phantom_node_pair.source_phantom.GetForwardWeightPlusOffset());
                 // SimpleLogger().Write(logDEBUG) << "fwd-b2 insert: " <<
-                // phantom_node_pair.source_phantom.forward_node_id << ", w: " << (allow_u_turn ? 0
-                // : distance1) - phantom_node_pair.source_phantom.GetForwardWeightPlusOffset();
+                // phantom_node_pair.source_phantom.forward_node_id << ", w: " << -phantom_node_pair.source_phantom.GetForwardWeightPlusOffset();
             }
             if ((allow_u_turn || search_from_2nd_node) &&
                 phantom_node_pair.source_phantom.reverse_node_id != SPECIAL_NODEID)
             {
                 forward_heap1.Insert(
                     phantom_node_pair.source_phantom.reverse_node_id,
-                    (allow_u_turn ? 0 : distance2) -
-                        phantom_node_pair.source_phantom.GetReverseWeightPlusOffset(),
+                    -phantom_node_pair.source_phantom.GetReverseWeightPlusOffset(),
                     phantom_node_pair.source_phantom.reverse_node_id);
-                min_edge_offset =
-                    std::min(min_edge_offset,
-                             (allow_u_turn ? 0 : distance2) -
-                                 phantom_node_pair.source_phantom.GetReverseWeightPlusOffset());
                 // SimpleLogger().Write(logDEBUG) << "fwd-a2 insert: " <<
-                // phantom_node_pair.source_phantom.reverse_node_id <<
-                //                     ", w: " << (allow_u_turn ? 0 : distance2) -
-                //                     phantom_node_pair.source_phantom.GetReverseWeightPlusOffset();
+                // phantom_node_pair.source_phantom.reverse_node_id << ", w: " << -phantom_node_pair.source_phantom.GetReverseWeightPlusOffset();
                 forward_heap2.Insert(
                     phantom_node_pair.source_phantom.reverse_node_id,
-                    (allow_u_turn ? 0 : distance2) -
-                        phantom_node_pair.source_phantom.GetReverseWeightPlusOffset(),
+                    -phantom_node_pair.source_phantom.GetReverseWeightPlusOffset(),
                     phantom_node_pair.source_phantom.reverse_node_id);
-                min_edge_offset =
-                    std::min(min_edge_offset,
-                             (allow_u_turn ? 0 : distance2) -
-                                 phantom_node_pair.source_phantom.GetReverseWeightPlusOffset());
                 // SimpleLogger().Write(logDEBUG) << "fwd-b2 insert: " <<
-                // phantom_node_pair.source_phantom.reverse_node_id <<
-                //                     ", w: " << (allow_u_turn ? 0 : distance2) -
-                //                     phantom_node_pair.source_phantom.GetReverseWeightPlusOffset();
+                // phantom_node_pair.source_phantom.reverse_node_id << ", w: " << -phantom_node_pair.source_phantom.GetReverseWeightPlusOffset();
             }
 
             // insert new backward nodes into backward heap, unadjusted.
@@ -160,9 +137,7 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
                                      phantom_node_pair.target_phantom.GetForwardWeightPlusOffset(),
                                      phantom_node_pair.target_phantom.forward_node_id);
                 // SimpleLogger().Write(logDEBUG) << "rev-a insert: " <<
-                // phantom_node_pair.target_phantom.forward_node_id <<
-                //                     ", w: " <<
-                //                     phantom_node_pair.target_phantom.GetForwardWeightPlusOffset();
+                // phantom_node_pair.target_phantom.forward_node_id << ", w: " << phantom_node_pair.target_phantom.GetForwardWeightPlusOffset();
             }
 
             if (phantom_node_pair.target_phantom.reverse_node_id != SPECIAL_NODEID)
@@ -171,9 +146,7 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
                                      phantom_node_pair.target_phantom.GetReverseWeightPlusOffset(),
                                      phantom_node_pair.target_phantom.reverse_node_id);
                 // SimpleLogger().Write(logDEBUG) << "rev-a insert: " <<
-                // phantom_node_pair.target_phantom.reverse_node_id <<
-                //                     ", w: " <<
-                //                     phantom_node_pair.target_phantom.GetReverseWeightPlusOffset();
+                // phantom_node_pair.target_phantom.reverse_node_id << ", w: " << phantom_node_pair.target_phantom.GetReverseWeightPlusOffset();
             }
 
             // run two-Target Dijkstra routing step.
@@ -299,11 +272,13 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
                     if (start_id_of_leg1 != last_id_of_packed_legs1)
                     {
                         packed_legs1 = packed_legs2;
+                        distance1 = distance2;
                         BOOST_ASSERT(start_id_of_leg1 == temporary_packed_leg1.front());
                     }
                     else if (start_id_of_leg2 != last_id_of_packed_legs2)
                     {
                         packed_legs2 = packed_legs1;
+                        distance2 = distance1;
                         BOOST_ASSERT(start_id_of_leg2 == temporary_packed_leg2.front());
                     }
                 }
@@ -331,8 +306,8 @@ class ShortestPathRouting final : public BasicRoutingInterface<DataFacadeT>
                 BOOST_ASSERT(search_from_1st_node != search_from_2nd_node);
             }
 
-            distance1 = local_upper_bound1;
-            distance2 = local_upper_bound2;
+            distance1 += local_upper_bound1;
+            distance2 += local_upper_bound2;
             ++current_leg;
         }
 

@@ -9,6 +9,8 @@
 cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 
 #-----------------------------------------------------------------------------
 #
@@ -16,14 +18,21 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 #
 #-----------------------------------------------------------------------------
 
+set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel;Dev;Coverage"
+    CACHE STRING
+    "List of available configuration types"
+    FORCE)
+
 project(libosmium)
 
-set(LIBOSMIUM_VERSION_MAJOR 0)
-set(LIBOSMIUM_VERSION_MINOR 0)
-set(LIBOSMIUM_VERSION_PATCH 1)
+set(LIBOSMIUM_VERSION_MAJOR 2)
+set(LIBOSMIUM_VERSION_MINOR 3)
+set(LIBOSMIUM_VERSION_PATCH 0)
 
 set(LIBOSMIUM_VERSION
-    ${LIBOSMIUM_VERSION_MAJOR}.${LIBOSMIUM_VERSION_MINOR}.${LIBOSMIUM_VERSION_PATCH})
+    "${LIBOSMIUM_VERSION_MAJOR}.${LIBOSMIUM_VERSION_MINOR}.${LIBOSMIUM_VERSION_PATCH}"
+    CACHE STRING
+    "Libosmium version")
 
 
 #-----------------------------------------------------------------------------
@@ -46,6 +55,57 @@ option(BUILD_TESTING    "compile unit tests, please run them with ctest" ON)
 option(BUILD_HEADERS    "compile every header file on its own" ${dev_build})
 option(BUILD_BENCHMARKS "compile benchmark programs" ${dev_build})
 option(BUILD_DATA_TESTS "compile data tests, please run them with ctest" ${dev_build})
+
+
+#-----------------------------------------------------------------------------
+#
+#  Coverage support
+#
+#-----------------------------------------------------------------------------
+
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fkeep-inline-functions" HAS_KEEP_INLINE_FUNCTIONS)
+if(HAS_KEEP_INLINE_FUNCTIONS)
+    set(extra_coverage_flags_ "-fkeep-inline-functions")
+endif()
+
+set(CMAKE_CXX_FLAGS_COVERAGE
+    "-g -O0 -fno-inline-functions -fno-inline --coverage ${extra_coverage_flags_}"
+    CACHE STRING "Flags used by the compiler during coverage builds.")
+
+set(CMAKE_EXE_LINKER_FLAGS_COVERAGE
+    "--coverage"
+    CACHE STRING "Flags used by the linker during coverage builds.")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Coverage")
+    if(BUILD_EXAMPLES OR BUILD_HEADERS OR BUILD_BENCHMARKS OR BUILD_DATA_TESTS)
+        message(WARNING "Coverage builds don't work for anything but the unit tests")
+    endif()
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        string(REGEX REPLACE "^([0-9]+)\\.([0-9]+).*$" "llvm-cov-\\1.\\2"
+               gcov_ ${CMAKE_CXX_COMPILER_VERSION})
+    else()
+        set(gcov_ "gcov")
+    endif()
+
+    find_program(GCOV ${gcov_} DOC "Coverage tool")
+    find_program(GCOVR "gcovr" DOC "Coverage report tool")
+
+    set(coverage_report_dir "${CMAKE_BINARY_DIR}/coverage")
+    file(MAKE_DIRECTORY ${coverage_report_dir})
+    add_custom_target(coverage
+        ${GCOVR}
+        ${CMAKE_BINARY_DIR}
+        --root=${CMAKE_SOURCE_DIR}
+        --html --html-details
+        #--verbose
+        #--keep
+        '--filter=.*include/osmium.*'
+        --sort-percentage
+        --gcov-executable=${GCOV}
+        --output=${coverage_report_dir}/index.html)
+endif()
 
 
 #-----------------------------------------------------------------------------
@@ -106,8 +166,10 @@ endif()
 #-----------------------------------------------------------------------------
 if(MSVC)
     set(USUAL_COMPILE_OPTIONS "/Ox")
+    set(USUAL_LINK_OPTIONS "/debug")
 else()
     set(USUAL_COMPILE_OPTIONS "-O3 -g")
+    set(USUAL_LINK_OPTIONS "")
 endif()
 
 if(WIN32)
@@ -119,7 +181,7 @@ set(CMAKE_CXX_FLAGS_DEV "${USUAL_COMPILE_OPTIONS}"
     CACHE STRING "Flags used by the compiler during developer builds."
     FORCE)
 
-set(CMAKE_EXE_LINKER_FLAGS_DEV ""
+set(CMAKE_EXE_LINKER_FLAGS_DEV "${USUAL_LINK_OPTIONS}"
     CACHE STRING "Flags used by the linker during developer builds."
     FORCE)
 mark_as_advanced(
@@ -137,8 +199,6 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${USUAL_COMPILE_OPTIONS}"
 #  Build Type
 #
 #-----------------------------------------------------------------------------
-set(CMAKE_CONFIGURATION_TYPES "Debug Release RelWithDebInfo MinSizeRel Dev")
-
 # In 'Dev' mode: compile with very strict warnings and turn them into errors.
 if(CMAKE_BUILD_TYPE STREQUAL "Dev")
     if(NOT MSVC)
@@ -278,14 +338,6 @@ if(BUILD_HEADERS)
         # There is no way in CMake to just compile but not link a C++ file,
         # so we pretend to build a library here.
         add_library(${libname} STATIC ${DUMMYCPP} include/${hpp})
-
-        if(MSVC)
-            # Remove warning LNK4221: "This object file does not define any
-            # previously undefined public symbols, so it will not be used by
-            # any link operation that consumes this library". This is a dummy
-            # library anyways.
-            target_link_libraries(${libname} /wd4221)
-        endif()
 
         #### this is better but only supported from cmake 3.0:
         ###add_library(${libname} OBJECT ${DUMMYCPP} include/${hpp})

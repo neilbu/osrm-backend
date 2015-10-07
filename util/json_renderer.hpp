@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -32,17 +32,25 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define JSON_RENDERER_HPP
 
 #include "cast.hpp"
+#include "string_util.hpp"
 
 #include <osrm/json_container.hpp>
 
-namespace JSON
+namespace osrm
+{
+namespace json
 {
 
 struct Renderer : mapbox::util::static_visitor<>
 {
     explicit Renderer(std::ostream &_out) : out(_out) {}
 
-    void operator()(const String &string) const { out << "\"" << string.value << "\""; }
+    void operator()(const String &string) const
+    {
+        out << "\"";
+        out << escape_JSON(string.value);
+        out << "\"";
+    }
 
     void operator()(const Number &number) const
     {
@@ -53,12 +61,11 @@ struct Renderer : mapbox::util::static_visitor<>
     void operator()(const Object &object) const
     {
         out << "{";
-        auto iterator = object.values.begin();
-        while (iterator != object.values.end())
+        for (auto it = object.values.begin(), end = object.values.end(); it != end;)
         {
-            out << "\"" << (*iterator).first << "\":";
-            mapbox::util::apply_visitor(Renderer(out), (*iterator).second);
-            if (++iterator != object.values.end())
+            out << "\"" << it->first << "\":";
+            mapbox::util::apply_visitor(Renderer(out), it->second);
+            if (++it != end)
             {
                 out << ",";
             }
@@ -69,12 +76,10 @@ struct Renderer : mapbox::util::static_visitor<>
     void operator()(const Array &array) const
     {
         out << "[";
-        std::vector<Value>::const_iterator iterator;
-        iterator = array.values.begin();
-        while (iterator != array.values.end())
+        for (auto it = array.values.cend(), end = array.values.cend(); it != end;)
         {
-            mapbox::util::apply_visitor(Renderer(out), *iterator);
-            if (++iterator != array.values.end())
+            mapbox::util::apply_visitor(Renderer(out), *it);
+            if (++it != end)
             {
                 out << ",";
             }
@@ -99,7 +104,8 @@ struct ArrayRenderer : mapbox::util::static_visitor<>
     void operator()(const String &string) const
     {
         out.push_back('\"');
-        out.insert(out.end(), string.value.begin(), string.value.end());
+        const auto string_to_insert = escape_JSON(string.value);
+        out.insert(std::end(out), std::begin(string_to_insert), std::end(string_to_insert));
         out.push_back('\"');
     }
 
@@ -112,16 +118,15 @@ struct ArrayRenderer : mapbox::util::static_visitor<>
     void operator()(const Object &object) const
     {
         out.push_back('{');
-        auto iterator = object.values.begin();
-        while (iterator != object.values.end())
+        for (auto it = object.values.begin(), end = object.values.end(); it != end;)
         {
             out.push_back('\"');
-            out.insert(out.end(), (*iterator).first.begin(), (*iterator).first.end());
+            out.insert(out.end(), it->first.begin(), it->first.end());
             out.push_back('\"');
             out.push_back(':');
 
-            mapbox::util::apply_visitor(ArrayRenderer(out), (*iterator).second);
-            if (++iterator != object.values.end())
+            mapbox::util::apply_visitor(ArrayRenderer(out), it->second);
+            if (++it != end)
             {
                 out.push_back(',');
             }
@@ -132,12 +137,10 @@ struct ArrayRenderer : mapbox::util::static_visitor<>
     void operator()(const Array &array) const
     {
         out.push_back('[');
-        std::vector<Value>::const_iterator iterator;
-        iterator = array.values.begin();
-        while (iterator != array.values.end())
+        for (auto it = array.values.cbegin(), end = array.values.cend(); it != end;)
         {
-            mapbox::util::apply_visitor(ArrayRenderer(out), *iterator);
-            if (++iterator != array.values.end())
+            mapbox::util::apply_visitor(ArrayRenderer(out), *it);
+            if (++it != end)
             {
                 out.push_back(',');
             }
@@ -179,6 +182,6 @@ inline void render(std::vector<char> &out, const Object &object)
     mapbox::util::apply_visitor(ArrayRenderer(out), value);
 }
 
-} // namespace JSON
-
+} // namespace json
+} // namespace osrm
 #endif // JSON_RENDERER_HPP

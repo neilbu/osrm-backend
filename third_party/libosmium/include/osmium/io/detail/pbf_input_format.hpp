@@ -49,9 +49,12 @@ DEALINGS IN THE SOFTWARE.
 #include <thread>
 #include <type_traits>
 
+#include <protozero/pbf_message.hpp>
+
 #include <osmium/io/detail/input_format.hpp>
 #include <osmium/io/detail/pbf.hpp> // IWYU pragma: export
-#include <osmium/io/detail/pbf_parser.hpp>
+#include <osmium/io/detail/pbf_decoder.hpp>
+#include <osmium/io/detail/protobuf_tags.hpp>
 #include <osmium/io/error.hpp>
 #include <osmium/io/file.hpp>
 #include <osmium/io/file_format.hpp>
@@ -76,16 +79,17 @@ namespace osmium {
 
         namespace detail {
 
-            typedef osmium::thread::Queue<std::future<osmium::memory::Buffer>> queue_type;
-
             /**
              * Class for parsing PBF files.
              */
             class PBFInputFormat : public osmium::io::detail::InputFormat {
 
+                typedef osmium::thread::Queue<std::future<osmium::memory::Buffer>> queue_type;
+
                 bool m_use_thread_pool;
+                bool m_eof { false };
                 queue_type m_queue;
-                std::atomic<bool> m_done;
+                std::atomic<bool> m_quit_input_thread;
                 std::thread m_reader;
                 osmium::thread::Queue<std::string>& m_input_queue;
                 std::string m_input_buffer;
@@ -114,15 +118,10 @@ namespace osmium {
                 }
 
                 /**
-                 * Read BlobHeader by first reading the size and then the
-                 * BlobHeader. The BlobHeader contains a type field (which is
-                 * checked against the expected type) and a size field.
-                 *
-                 * @param expected_type Expected type of data ("OSMHeader" or
-                 *                      "OSMData").
-                 * @returns Size of the data read from BlobHeader (0 on EOF).
+                 * Read 4 bytes in network byte order from file. They contain
+                 * the length of the following BlobHeader.
                  */
-                size_t read_blob_header(const char* expected_type) {
+                uint32_t read_blob_header_size_from_file() {
                     uint32_t size_in_network_byte_order;
 
                     try {
@@ -132,43 +131,91 @@ namespace osmium {
                         return 0; // EOF
                     }
 
-                    uint32_t size = ntohl(size_in_network_byte_order);
-                    if (size > static_cast<uint32_t>(OSMPBF::max_blob_header_size)) {
+                    const uint32_t size = ntohl(size_in_network_byte_order);
+                    if (size > static_cast<uint32_t>(max_blob_header_size)) {
                         throw osmium::pbf_error("invalid BlobHeader size (> max_blob_header_size)");
                     }
 
-                    OSMPBF::BlobHeader blob_header;
-                    if (!blob_header.ParseFromString(read_from_input_queue(size))) {
-                        throw osmium::pbf_error("failed to parse BlobHeader");
+                    return size;
+                }
+
+                /**
+                 * Decode the BlobHeader. Make sure it contains the expected
+                 * type. Return the size of the following Blob.
+                 */
+                size_t decode_blob_header(protozero::pbf_message<FileFormat::BlobHeader>&& pbf_blob_header, const char* expected_type) {
+                    std::pair<const char*, size_t> blob_header_type;
+                    size_t blob_header_datasize = 0;
+
+                    while (pbf_blob_header.next()) {
+                        switch (pbf_blob_header.tag()) {
+                            case FileFormat::BlobHeader::required_string_type:
+                                blob_header_type = pbf_blob_header.get_data();
+                                break;
+                            case FileFormat::BlobHeader::required_int32_datasize:
+                                blob_header_datasize = pbf_blob_header.get_int32();
+                                break;
+                            default:
+                                pbf_blob_header.skip();
+                        }
                     }
 
-                    if (blob_header.type() != expected_type) {
+                    if (blob_header_datasize == 0) {
+                        throw osmium::pbf_error("PBF format error: BlobHeader.datasize missing or zero.");
+                    }
+
+                    if (strncmp(expected_type, blob_header_type.first, blob_header_type.second)) {
                         throw osmium::pbf_error("blob does not have expected type (OSMHeader in first blob, OSMData in following blobs)");
                     }
 
-                    return static_cast<size_t>(blob_header.datasize());
+                    return blob_header_datasize;
+                }
+
+                size_t check_type_and_get_blob_size(const char* expected_type) {
+                    assert(expected_type);
+
+                    auto size = read_blob_header_size_from_file();
+                    if (size == 0) { // EOF
+                        return 0;
+                    }
+
+                    std::string blob_header = read_from_input_queue(size);
+
+                    return decode_blob_header(protozero::pbf_message<FileFormat::BlobHeader>(blob_header), expected_type);
                 }
 
                 void parse_osm_data(osmium::osm_entity_bits::type read_types) {
                     osmium::thread::set_thread_name("_osmium_pbf_in");
-                    int n=0;
-                    while (auto size = read_blob_header("OSMData")) {
+
+                    while (auto size = check_type_and_get_blob_size("OSMData")) {
+                        std::string input_buffer = read_from_input_queue(size);
+                        if (input_buffer.size() > max_uncompressed_blob_size) {
+                            throw osmium::pbf_error(std::string("invalid blob size: " + std::to_string(input_buffer.size())));
+                        }
 
                         if (m_use_thread_pool) {
-                            m_queue.push(osmium::thread::Pool::instance().submit(DataBlobParser{read_from_input_queue(size), read_types}));
+                            m_queue.push(osmium::thread::Pool::instance().submit(PBFDataBlobDecoder{ std::move(input_buffer), read_types }));
                         } else {
                             std::promise<osmium::memory::Buffer> promise;
                             m_queue.push(promise.get_future());
-                            DataBlobParser data_blob_parser{read_from_input_queue(size), read_types};
+                            PBFDataBlobDecoder data_blob_parser{ std::move(input_buffer), read_types };
                             promise.set_value(data_blob_parser());
                         }
-                        ++n;
 
-                        if (m_done) {
+                        if (m_quit_input_thread) {
                             return;
                         }
                     }
-                    m_done = true;
+
+                    // Send an empty buffer to signal the reader that we are
+                    // done.
+                    std::promise<osmium::memory::Buffer> promise;
+                    m_queue.push(promise.get_future());
+                    promise.set_value(osmium::memory::Buffer{});
+                }
+
+                void signal_input_thread_to_quit() {
+                    m_quit_input_thread = true;
                 }
 
             public:
@@ -184,14 +231,13 @@ namespace osmium {
                     osmium::io::detail::InputFormat(file, read_which_entities),
                     m_use_thread_pool(osmium::config::use_pool_threads_for_pbf_parsing()),
                     m_queue(20, "pbf_parser_results"), // XXX
-                    m_done(false),
+                    m_quit_input_thread(false),
                     m_input_queue(input_queue),
                     m_input_buffer() {
-                    GOOGLE_PROTOBUF_VERIFY_VERSION;
 
                     // handle OSMHeader
-                    auto size = read_blob_header("OSMHeader");
-                    m_header = parse_header_blob(read_from_input_queue(size));
+                    const auto size = check_type_and_get_blob_size("OSMHeader");
+                    m_header = decode_header(read_from_input_queue(size));
 
                     if (m_read_which_entities != osmium::osm_entity_bits::nothing) {
                         m_reader = std::thread(&PBFInputFormat::parse_osm_data, this, m_read_which_entities);
@@ -199,35 +245,52 @@ namespace osmium {
                 }
 
                 ~PBFInputFormat() {
-                    m_done = true;
+                    signal_input_thread_to_quit();
                     if (m_reader.joinable()) {
                         m_reader.join();
                     }
                 }
 
                 /**
-                 * Returns the next buffer with OSM data read from the PBF file.
-                 * Blocks if data is not available yet.
+                 * Returns the next buffer with OSM data read from the PBF
+                 * file. Blocks if data is not available yet.
                  * Returns an empty buffer at end of input.
                  */
                 osmium::memory::Buffer read() override {
-                    if (!m_done || !m_queue.empty()) {
-                        std::future<osmium::memory::Buffer> buffer_future;
-                        m_queue.wait_and_pop(buffer_future);
-                        return buffer_future.get();
+                    osmium::memory::Buffer buffer;
+                    if (m_eof) {
+                        return buffer;
                     }
 
-                    return osmium::memory::Buffer();
+                    std::future<osmium::memory::Buffer> buffer_future;
+                    m_queue.wait_and_pop(buffer_future);
+
+                    try {
+                        buffer = std::move(buffer_future.get());
+                        if (!buffer) {
+                            m_eof = true;
+                        }
+                        return buffer;
+                    } catch (...) {
+                        m_eof = true;
+                        signal_input_thread_to_quit();
+                        throw;
+                    }
                 }
 
             }; // class PBFInputFormat
 
             namespace {
 
+// we want the register_input_format() function to run, setting the variable
+// is only a side-effect, it will never be used
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
                 const bool registered_pbf_input = osmium::io::detail::InputFormatFactory::instance().register_input_format(osmium::io::file_format::pbf,
                     [](const osmium::io::File& file, osmium::osm_entity_bits::type read_which_entities, osmium::thread::Queue<std::string>& input_queue) {
                         return new osmium::io::detail::PBFInputFormat(file, read_which_entities, input_queue);
                 });
+#pragma GCC diagnostic pop
 
             } // anonymous namespace
 

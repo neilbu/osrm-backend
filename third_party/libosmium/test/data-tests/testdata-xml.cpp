@@ -12,6 +12,10 @@
 #include <osmium/io/gzip_compression.hpp>
 #include <osmium/visitor.hpp>
 
+std::string S_(const char* s) {
+    return std::string(s);
+}
+
 std::string filename(const char* test_id, const char* suffix = "osm") {
     const char* testdir = getenv("TESTDIR");
     if (!testdir) {
@@ -46,7 +50,7 @@ std::string read_file(const char* test_id) {
     assert(fd >= 0);
 
     std::string input(10000, '\0');
-    ssize_t n = ::read(fd, reinterpret_cast<unsigned char*>(const_cast<char*>(input.data())), 10000);
+    auto n = ::read(fd, reinterpret_cast<unsigned char*>(const_cast<char*>(input.data())), 10000);
     assert(n >= 0);
     input.resize(static_cast<std::string::size_type>(n));
 
@@ -285,18 +289,202 @@ TEST_CASE("Reading OSM XML 121") {
         }, osmium::gzip_error);
     }
 
-#if 0
     SECTION("Using Reader") {
-        REQUIRE_THROWS_AS({
+        // can throw osmium::gzip_error or osmium::xml_error
+        REQUIRE_THROWS({
             osmium::io::Reader reader(filename("121-truncated_gzip_file", "osm.gz"));
             osmium::io::Header header = reader.header();
             osmium::memory::Buffer buffer = reader.read();
             reader.close();
-        }, osmium::gzip_error);
+        });
     }
-#endif
 
 }
+
+// =============================================
+
+TEST_CASE("Reading OSM XML 122") {
+
+    SECTION("Direct") {
+        REQUIRE_THROWS_AS( {
+            read_xml("122-no_osm_element");
+        }, osmium::xml_error);
+    }
+
+    SECTION("Using Reader") {
+        REQUIRE_THROWS_AS({
+            osmium::io::Reader reader(filename("122-no_osm_element"));
+            osmium::io::Header header = reader.header();
+            osmium::memory::Buffer buffer = reader.read();
+            reader.close();
+        }, osmium::xml_error);
+    }
+
+}
+
+// =============================================
+
+TEST_CASE("Reading OSM XML 140") {
+
+    SECTION("Using Reader") {
+        osmium::io::Reader reader(filename("140-unicode"));
+        osmium::memory::Buffer buffer = reader.read();
+        reader.close();
+
+        int count = 0;
+        for (auto it = buffer.begin<osmium::Node>(); it != buffer.end<osmium::Node>(); ++it) {
+            ++count;
+            REQUIRE(it->id() == count);
+            const osmium::TagList& t = it->tags();
+
+            const char* uc = t["unicode_char"];
+
+            auto len = atoi(t["unicode_utf8_length"]);
+            REQUIRE(len == strlen(uc));
+
+            REQUIRE(S_(uc) == t["unicode_xml"]);
+
+// workaround for missing support for u8 string literals on Windows
+#if !defined(_MSC_VER)
+            switch (count) {
+                case 1:
+                    REQUIRE(S_(uc) ==  u8"a");
+                    break;
+                case 2:
+                    REQUIRE(S_(uc) == u8"\u00e4");
+                    break;
+                case 3:
+                    REQUIRE(S_(uc) == u8"\u30dc");
+                    break;
+                case 4:
+                    REQUIRE(S_(uc) == u8"\U0001d11e");
+                    break;
+                case 5:
+                    REQUIRE(S_(uc) == u8"\U0001f6eb");
+                    break;
+                default:
+                    REQUIRE(false); // should not be here
+            }
+#endif
+        }
+        REQUIRE(count == 5);
+    }
+
+}
+
+
+// =============================================
+
+TEST_CASE("Reading OSM XML 141") {
+
+    SECTION("Using Reader") {
+        osmium::io::Reader reader(filename("141-entities"));
+        osmium::memory::Buffer buffer = reader.read();
+        reader.close();
+        REQUIRE(buffer.committed() > 0);
+        REQUIRE(buffer.get<osmium::memory::Item>(0).type() == osmium::item_type::node);
+
+        const osmium::Node& node = buffer.get<osmium::Node>(0);
+        const osmium::TagList& tags = node.tags();
+
+        REQUIRE(S_(tags["less-than"])    == "<");
+        REQUIRE(S_(tags["greater-than"]) == ">");
+        REQUIRE(S_(tags["apostrophe"])   == "'");
+        REQUIRE(S_(tags["ampersand"])    == "&");
+        REQUIRE(S_(tags["quote"])        == "\"");
+    }
+
+}
+
+
+// =============================================
+
+TEST_CASE("Reading OSM XML 142") {
+
+    SECTION("Using Reader to read nodes") {
+        osmium::io::Reader reader(filename("142-whitespace"));
+        osmium::memory::Buffer buffer = reader.read();
+        reader.close();
+
+        int count = 0;
+        for (auto it = buffer.begin<osmium::Node>(); it != buffer.end<osmium::Node>(); ++it) {
+            ++count;
+            REQUIRE(it->id() == count);
+            REQUIRE(it->tags().size() == 1);
+            const osmium::Tag& tag = *(it->tags().begin());
+
+            switch (count) {
+                case 1:
+                    REQUIRE(S_(it->user()) == "user name");
+                    REQUIRE(S_(tag.key()) == "key with space");
+                    REQUIRE(S_(tag.value()) == "value with space");
+                    break;
+                case 2:
+                    REQUIRE(S_(it->user()) == "line\nfeed");
+                    REQUIRE(S_(tag.key()) == "key with\nlinefeed");
+                    REQUIRE(S_(tag.value()) == "value with\nlinefeed");
+                    break;
+                case 3:
+                    REQUIRE(S_(it->user()) == "carriage\rreturn");
+                    REQUIRE(S_(tag.key()) == "key with\rcarriage\rreturn");
+                    REQUIRE(S_(tag.value()) == "value with\rcarriage\rreturn");
+                    break;
+                case 4:
+                    REQUIRE(S_(it->user()) == "tab\tulator");
+                    REQUIRE(S_(tag.key()) == "key with\ttab");
+                    REQUIRE(S_(tag.value()) == "value with\ttab");
+                    break;
+                case 5:
+                    REQUIRE(S_(it->user()) == "unencoded linefeed");
+                    REQUIRE(S_(tag.key()) == "key with unencoded linefeed");
+                    REQUIRE(S_(tag.value()) == "value with unencoded linefeed");
+                    break;
+                default:
+                    REQUIRE(false); // should not be here
+            }
+        }
+        REQUIRE(count == 5);
+    }
+
+    SECTION("Using Reader to read relation") {
+        osmium::io::Reader reader(filename("142-whitespace"));
+        osmium::memory::Buffer buffer = reader.read();
+        reader.close();
+
+        auto it = buffer.begin<osmium::Relation>();
+        REQUIRE(it != buffer.end<osmium::Relation>());
+        REQUIRE(it->id() == 21);
+        const auto& members = it->members();
+        REQUIRE(members.size() == 5);
+
+        int count = 0;
+        for (const auto& member : members) {
+            ++count;
+            switch (count) {
+                case 1:
+                    REQUIRE(S_(member.role()) == "role with whitespace");
+                    break;
+                case 2:
+                    REQUIRE(S_(member.role()) == "role with\nlinefeed");
+                    break;
+                case 3:
+                    REQUIRE(S_(member.role()) == "role with\rcarriage\rreturn");
+                    break;
+                case 4:
+                    REQUIRE(S_(member.role()) == "role with\ttab");
+                    break;
+                case 5:
+                    REQUIRE(S_(member.role()) == "role with unencoded linefeed");
+                    break;
+                default:
+                    REQUIRE(false); // should not be here
+            }
+        }
+        REQUIRE(count == 5);
+    }
+
+}
+
 
 // =============================================
 

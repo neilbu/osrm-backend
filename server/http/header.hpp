@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -37,7 +37,7 @@ struct header
 {
     // explicitly use default copy c'tor as adding move c'tor
     header &operator=(const header &other) = default;
-    header(const std::string &name, const std::string &value) : name(name), value(value) {}
+    header(std::string name, std::string value) : name(std::move(name)), value(std::move(value)) {}
     header(header &&other) : name(std::move(other.name)), value(std::move(other.value)) {}
 
     void clear()

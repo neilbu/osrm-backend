@@ -28,11 +28,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef PROCESSING_CHAIN_HPP
 #define PROCESSING_CHAIN_HPP
 
+#include "contractor_options.hpp"
 #include "edge_based_graph_factory.hpp"
 #include "../data_structures/query_edge.hpp"
 #include "../data_structures/static_graph.hpp"
 
-class FingerPrint;
+struct SpeedProfileProperties;
 struct EdgeBasedNode;
 struct lua_State;
 
@@ -50,46 +51,41 @@ class Prepare
     using InputEdge = DynamicGraph<EdgeData>::InputEdge;
     using StaticEdge = StaticGraph<EdgeData>::InputEdge;
 
-    explicit Prepare();
+    explicit Prepare(ContractorConfig contractor_config) : config(std::move(contractor_config)) {}
     Prepare(const Prepare &) = delete;
     ~Prepare();
 
-    int Process(int argc, char *argv[]);
+    int Run();
 
   protected:
-    bool ParseArguments(int argc, char *argv[]);
-    void CheckRestrictionsFile(FingerPrint &fingerprint_orig);
-    bool SetupScriptingEnvironment(lua_State *myLuaState,
-                                   EdgeBasedGraphFactory::SpeedProfileProperties &speed_profile);
-    std::size_t BuildEdgeExpandedGraph(lua_State *myLuaState,
-                                       NodeID nodeBasedNodeNumber,
-                                       std::vector<EdgeBasedNode> &nodeBasedEdgeList,
-                                       DeallocatingVector<EdgeBasedEdge> &edgeBasedEdgeList,
-                                       EdgeBasedGraphFactory::SpeedProfileProperties &speed_profile);
-    void WriteNodeMapping();
-    void BuildRTree(std::vector<EdgeBasedNode> &node_based_edge_list);
+    void SetupScriptingEnvironment(lua_State *myLuaState, SpeedProfileProperties &speed_profile);
+    unsigned CalculateEdgeChecksum(const std::vector<EdgeBasedNode> &node_based_edge_list);
+    void ContractGraph(const unsigned max_edge_id,
+                       DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list,
+                       DeallocatingVector<QueryEdge> &contracted_edge_list,
+                       std::vector<bool> &is_core_node);
+    void WriteCoreNodeMarker(std::vector<bool> &&is_core_node) const;
+    std::size_t WriteContractedGraph(unsigned number_of_edge_based_nodes,
+                                     const std::vector<EdgeBasedNode> &node_based_edge_list,
+                                     const DeallocatingVector<QueryEdge> &contracted_edge_list);
+    std::shared_ptr<RestrictionMap> LoadRestrictionMap();
+    std::shared_ptr<NodeBasedDynamicGraph>
+    LoadNodeBasedGraph(std::unordered_set<NodeID> &barrier_nodes,
+                       std::unordered_set<NodeID> &traffic_lights,
+                       std::vector<QueryNode> &internal_to_external_node_map);
+    std::pair<std::size_t, std::size_t>
+    BuildEdgeExpandedGraph(std::vector<QueryNode> &internal_to_external_node_map,
+                           std::vector<EdgeBasedNode> &node_based_edge_list,
+                           DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list);
+    void WriteNodeMapping(const std::vector<QueryNode> &internal_to_external_node_map);
+    void FindComponents(unsigned max_edge_id,
+                        const DeallocatingVector<EdgeBasedEdge> &edges,
+                        std::vector<EdgeBasedNode> &nodes) const;
+    void BuildRTree(const std::vector<EdgeBasedNode> &node_based_edge_list,
+                    const std::vector<QueryNode> &internal_to_external_node_map);
 
   private:
-    std::vector<QueryNode> internal_to_external_node_map;
-    std::vector<TurnRestriction> restriction_list;
-    std::vector<NodeID> barrier_node_list;
-    std::vector<NodeID> traffic_light_list;
-    std::vector<ImportEdge> edge_list;
-
-    unsigned requested_num_threads;
-    boost::filesystem::path config_file_path;
-    boost::filesystem::path input_path;
-    boost::filesystem::path restrictions_path;
-    boost::filesystem::path preinfo_path;
-    boost::filesystem::path profile_path;
-
-    std::string node_filename;
-    std::string edge_out;
-    std::string info_out;
-    std::string geometry_filename;
-    std::string graph_out;
-    std::string rtree_nodes_path;
-    std::string rtree_leafs_path;
+    ContractorConfig config;
 };
 
 #endif // PROCESSING_CHAIN_HPP

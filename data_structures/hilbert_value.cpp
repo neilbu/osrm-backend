@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2014, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -57,7 +57,7 @@ uint64_t HilbertCode::BitInterleaving(const uint32_t latitude, const uint32_t lo
 
 void HilbertCode::TransposeCoordinate(uint32_t *X) const
 {
-    uint32_t M = 1 << (32 - 1), P, Q, t;
+    uint32_t M = 1u << (32 - 1), P, Q, t;
     int i;
     // Inverse undo
     for (Q = M; Q > 1; Q >>= 1)

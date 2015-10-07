@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -33,15 +33,24 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 struct libosrm_config
 {
     libosrm_config(const libosrm_config &) = delete;
-    libosrm_config() : max_locations_distance_table(100), use_shared_memory(false) {}
+    libosrm_config()
+        : max_locations_distance_table(100), max_locations_map_matching(-1),
+          use_shared_memory(true)
+    {
+    }
 
-    libosrm_config(const ServerPaths &paths, const bool flag, const int max)
-        : server_paths(paths), max_locations_distance_table(max), use_shared_memory(flag)
+    libosrm_config(ServerPaths paths,
+                   const bool sharedmemory_flag,
+                   const int max_table,
+                   const int max_matching)
+        : server_paths(std::move(paths)), max_locations_distance_table(max_table),
+          max_locations_map_matching(max_matching), use_shared_memory(sharedmemory_flag)
     {
     }
 
     ServerPaths server_paths;
     int max_locations_distance_table;
+    int max_locations_map_matching;
     bool use_shared_memory;
 };
 

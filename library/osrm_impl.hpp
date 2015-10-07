@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -52,7 +52,7 @@ class OSRM_impl
     OSRM_impl(libosrm_config &lib_config);
     OSRM_impl(const OSRM_impl &) = delete;
     virtual ~OSRM_impl();
-    int RunQuery(RouteParameters &route_parameters, JSON::Object &json_result);
+    int RunQuery(RouteParameters &route_parameters, osrm::json::Object &json_result);
 
   private:
     void RegisterPlugin(BasePlugin *plugin);

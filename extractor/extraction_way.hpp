@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2014, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -34,6 +34,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
+/**
+ * This struct is the direct result of the call to ```way_function```
+ * in the lua based profile.
+ *
+ * It is split into multiple edge segments in the ExtractorCallback.
+ */
 struct ExtractionWay
 {
     ExtractionWay() { clear(); }
@@ -45,7 +51,6 @@ struct ExtractionWay
         duration = -1;
         roundabout = false;
         is_access_restricted = false;
-        ignore_in_grid = false;
         name.clear();
         forward_travel_mode = TRAVEL_MODE_DEFAULT;
         backward_travel_mode = TRAVEL_MODE_DEFAULT;
@@ -115,7 +120,6 @@ struct ExtractionWay
     std::string name;
     bool roundabout;
     bool is_access_restricted;
-    bool ignore_in_grid;
     TravelMode forward_travel_mode : 4;
     TravelMode backward_travel_mode : 4;
 };

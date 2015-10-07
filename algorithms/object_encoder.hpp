@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -79,7 +79,7 @@ struct ObjectEncoder
             replaceAll(encoded, "-", "+");
             replaceAll(encoded, "_", "/");
 
-            std::copy(binary_t(encoded.begin()), binary_t(encoded.begin() + encoded.length() - 1),
+            std::copy(binary_t(encoded.begin()), binary_t(encoded.begin() + encoded.length()),
                       reinterpret_cast<char *>(&object));
         }
         catch (...)

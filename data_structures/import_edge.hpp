@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2013, Project OSRM, Dennis Luxen, others
+Copyright (c) 2013, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -35,6 +35,7 @@ struct NodeBasedEdge
 {
     bool operator<(const NodeBasedEdge &e) const;
 
+    NodeBasedEdge();
     explicit NodeBasedEdge(NodeID source,
                            NodeID target,
                            NodeID name_id,
@@ -42,7 +43,6 @@ struct NodeBasedEdge
                            bool forward,
                            bool backward,
                            bool roundabout,
-                           bool in_tiny_cc,
                            bool access_restricted,
                            TravelMode travel_mode,
                            bool is_split);
@@ -54,12 +54,9 @@ struct NodeBasedEdge
     bool forward : 1;
     bool backward : 1;
     bool roundabout : 1;
-    bool in_tiny_cc : 1;
     bool access_restricted : 1;
     bool is_split : 1;
     TravelMode travel_mode : 4;
-
-    NodeBasedEdge() = delete;
 };
 
 struct EdgeBasedEdge
@@ -85,7 +82,5 @@ struct EdgeBasedEdge
     bool forward : 1;
     bool backward : 1;
 };
-
-using ImportEdge = NodeBasedEdge;
 
 #endif /* IMPORT_EDGE_HPP */

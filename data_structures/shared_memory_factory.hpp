@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -126,7 +126,7 @@ class SharedMemory
             shm = boost::interprocess::xsi_shared_memory(boost::interprocess::open_or_create, key,
                                                          size);
 #ifdef __linux__
-            if (-1 == shmctl(shm.get_shmid(), SHM_LOCK, 0))
+            if (-1 == shmctl(shm.get_shmid(), SHM_LOCK, nullptr))
             {
                 if (ENOMEM == errno)
                 {

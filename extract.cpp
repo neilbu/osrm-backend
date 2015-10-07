@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,6 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "util/simple_logger.hpp"
 
 #include <boost/filesystem.hpp>
+
+#include <exception>
 
 int main(int argc, char *argv[])
 {
@@ -71,7 +73,7 @@ int main(int argc, char *argv[])
                                              << " not found!";
             return 1;
         }
-        return extractor().run(extractor_config);
+        return extractor(extractor_config).run();
     }
     catch (const std::exception &e)
     {

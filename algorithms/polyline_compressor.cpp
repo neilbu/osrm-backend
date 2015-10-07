@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014, Project OSRM, Dennis Luxen, others
+Copyright (c) 2014, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -56,19 +56,11 @@ std::string PolylineCompressor::encode_number(int number_to_encode) const
     {
         const int next_value = (0x20 | (number_to_encode & 0x1f)) + 63;
         output += static_cast<char>(next_value);
-        if (92 == next_value)
-        {
-            output += static_cast<char>(next_value);
-        }
         number_to_encode >>= 5;
     }
 
     number_to_encode += 63;
     output += static_cast<char>(number_to_encode);
-    if (92 == number_to_encode)
-    {
-        output += static_cast<char>(number_to_encode);
-    }
     return output;
 }
 
@@ -95,4 +87,42 @@ PolylineCompressor::get_encoded_string(const std::vector<SegmentInformation> &po
         }
     }
     return encode_vector(delta_numbers);
+}
+
+std::vector<FixedPointCoordinate> PolylineCompressor::decode_string(const std::string &geometry_string) const
+{
+    std::vector<FixedPointCoordinate> new_coordinates;
+    int index = 0, len = geometry_string.size();
+    int lat = 0, lng = 0;
+  
+    while (index < len) 
+    {
+        int b, shift = 0, result = 0;
+        do 
+        {
+            b = geometry_string.at(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+        lat += dlat;
+
+        shift = 0;
+        result = 0;
+        do 
+        {
+            b = geometry_string.at(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+        lng += dlng;
+
+        FixedPointCoordinate p;
+        p.lat = COORDINATE_PRECISION * (((double) lat / 1E6));
+        p.lon = COORDINATE_PRECISION * (((double) lng / 1E6));
+        new_coordinates.push_back(p);
+    }
+
+    return new_coordinates;
 }

@@ -182,7 +182,7 @@ template <class DataFacadeT> class DistanceMatrixPlugin final : public BasePlugi
     }
 
     int HandleRequest(const RouteParameters &route_parameters,
-                      JSON::Object &json_result) override final
+                      osrm::json::Object &json_result) override final
     {
         unsigned calctime_in_ms = 0;
         std::shared_ptr<std::vector<std::pair<EdgeWeight, double>>> result_table = BuildMatrix(route_parameters, calctime_in_ms);
@@ -195,18 +195,18 @@ template <class DataFacadeT> class DistanceMatrixPlugin final : public BasePlugi
             return 500;
         }
 
-        JSON::Array json_array;
+        osrm::json::Array json_array;
         unsigned coord_size = route_parameters.coordinates.size();
 
         for (unsigned row = 0; row < coord_size; ++row)
         {
-            JSON::Array json_row;
+            osrm::json::Array json_row;
             for (unsigned column = 0; column < coord_size; ++column)
             {
                 unsigned i = (coord_size * row) + column;
                 auto routing_result = result_table->operator[](i);
 
-                JSON::Object result;
+                osrm::json::Object result;
                 result.values["time_cost"] = routing_result.first;
                 result.values["distance"] = routing_result.second;
                 json_row.values.emplace_back(result);

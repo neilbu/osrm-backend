@@ -37,18 +37,10 @@ DEALINGS IN THE SOFTWARE.
 #include <cstdint>
 #include <string>
 
-// Windows is only available for little endian architectures
-// http://stackoverflow.com/questions/6449468/can-i-safely-assume-that-windows-installations-will-always-be-little-endian
-#if !defined(_WIN32) && !defined(__APPLE__)
-# include <endian.h>
-#else
-# define __LITTLE_ENDIAN 1234
-# define __BYTE_ORDER __LITTLE_ENDIAN
-#endif
-
 #include <osmium/geom/coordinates.hpp>
 #include <osmium/geom/factory.hpp>
 #include <osmium/util/cast.hpp>
+#include <osmium/util/endian.hpp>
 
 namespace osmium {
 
@@ -161,7 +153,7 @@ namespace osmium {
                 typedef std::string multipolygon_type;
                 typedef std::string ring_type;
 
-                explicit WKBFactoryImpl(wkb_type wtype=wkb_type::wkb, out_type otype=out_type::binary) :
+                explicit WKBFactoryImpl(wkb_type wtype = wkb_type::wkb, out_type otype = out_type::binary) :
                     m_wkb_type(wtype),
                     m_out_type(otype) {
                 }

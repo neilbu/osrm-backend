@@ -82,6 +82,10 @@ When /^I route I should get$/ do |table|
         end
         if table.headers.include? 'route'
           got['route'] = (instructions || '').strip
+          if table.headers.include?('alternative')
+            raise "*** No alternative found ***" unless json['found_alternative']
+            got['alternative'] = way_list json['alternative_instructions'].first
+          end
           if table.headers.include?('distance')
             if row['distance']!=''
               raise "*** Distance must be specied in meters. (ex: 250m)" unless row['distance'] =~ /\d+m/
@@ -97,7 +101,7 @@ When /^I route I should get$/ do |table|
               raise "*** Speed must be specied in km/h. (ex: 50 km/h)" unless row['speed'] =~ /\d+ km\/h/
                 time = json['route_summary']['total_time']
                 distance = json['route_summary']['total_distance']
-                speed = time>0 ? (3.6*distance/time).to_i : nil
+                speed = time>0 ? (3.6*distance/time).round : nil
                 got['speed'] =  "#{speed} km/h"
             else
               got['speed'] = ''
@@ -140,7 +144,7 @@ When /^I route I should get$/ do |table|
       actual << got
     end
   end
-  table.routing_diff! actual
+  table.diff! actual
 end
 
 When /^I route (\d+) times I should get$/ do |n,table|

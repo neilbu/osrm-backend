@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015, Project OSRM, Dennis Luxen, others
+Copyright (c) 2015, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -85,7 +85,7 @@ class DescriptionFactory
     void SetEndSegment(const PhantomNode &start_phantom,
                        const bool traversed_in_reverse,
                        const bool is_via_location = false);
-    JSON::Value AppendGeometryString(const bool return_encoded);
+    osrm::json::Value AppendGeometryString(const bool return_encoded);
     std::vector<unsigned> const &GetViaIndices() const;
 
     double get_entire_length() const { return entire_length; }

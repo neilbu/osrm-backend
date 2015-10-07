@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2013, Project OSRM, Dennis Luxen, others
+Copyright (c) 2013, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,6 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 struct SegmentInformation;
 
+#include <osrm/coordinate.hpp>
+
 #include <string>
 #include <vector>
 
@@ -42,6 +44,8 @@ class PolylineCompressor
 
   public:
     std::string get_encoded_string(const std::vector<SegmentInformation> &polyline) const;
+    
+    std::vector<FixedPointCoordinate> decode_string(const std::string &geometry_string) const;
 };
 
 #endif /* POLYLINECOMPRESSOR_H_ */

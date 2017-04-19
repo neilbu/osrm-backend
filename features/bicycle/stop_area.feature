@@ -14,8 +14,10 @@ Feature: Bike - Stop areas for public transport
 
     Scenario: Bike - railway platforms
         Given the node map
-            | a | b | c | d |
-            |   | s | t |   |
+            """
+            a b c d
+              s t
+            """
 
         And the nodes
             | node | public_transport |
@@ -31,7 +33,7 @@ Feature: Bike - Stop areas for public transport
             | public_transport | stop_area        | c         | st           |
 
         When I route I should get
-            | from | to | route        |
-            | a    | d  | abcd         |
-            | s    | t  | st           |
-            | s    | d  | /st,.+,abcd/ |
+            | from | to | route              |
+            | a    | d  | abcd,abcd          |
+            | s    | t  | st,st              |
+            | s    | d  | /st,.+,abcd/,abcd/ |

@@ -9,8 +9,10 @@ Feature: Car - Speed on links
 
     Scenario: Car - Use motorway_link when reasonable
         Given the node map
-            |   |   | e |   |   |   | f |   |   |
-            | x | a | b |   |   |   | c | d | y |
+            """
+                e       f
+            x a b       c d y
+            """
 
         And the ways
             | nodes | highway       |
@@ -24,14 +26,16 @@ Feature: Car - Speed on links
             | dy    | unclassified  |
 
         When I route I should get
-            | from | to | route          |
-            | x    | y  | xa,ae,ef,fd,dy |
-            | b    | c  | bc             |
+            | from | to | route             |
+            | x    | y  | xa,ae,ef,fd,dy,dy |
+            | b    | c  | bc,bc             |
 
     Scenario: Car - Use trunk_link when reasonable
         Given the node map
-            |   |   | e |   |   |   | f |   |   |
-            | x | a | b |   |   |   | c | d | y |
+            """
+                e       f
+            x a b       c d y
+            """
 
         And the ways
             | nodes | highway      |
@@ -44,14 +48,16 @@ Feature: Car - Speed on links
             | fd    | trunk        |
             | dy    | unclassified |
         When I route I should get
-            | from | to | route          |
-            | x    | y  | xa,ae,ef,fd,dy |
-            | b    | c  | bc             |
+            | from | to | route             |
+            | x    | y  | xa,ae,ef,fd,dy,dy |
+            | b    | c  | bc,bc             |
 
     Scenario: Car - Use primary_link when reasonable
         Given the node map
-            |   |   | e |   |   |   | f |   |   |
-            | x | a | b |   |   |   | c | d | y |
+            """
+                e       f
+            x a b       c d y
+            """
 
         And the ways
             | nodes | highway        |
@@ -64,14 +70,16 @@ Feature: Car - Speed on links
             | fd    | primary        |
             | dy    | unclassified |
         When I route I should get
-            | from | to | route          |
-            | x    | y  | xa,ae,ef,fd,dy |
-            | b    | c  | bc             |
+            | from | to | route             |
+            | x    | y  | xa,ae,ef,fd,dy,dy |
+            | b    | c  | bc,bc             |
 
     Scenario: Car - Use secondary_link when reasonable
         Given the node map
-            |   |   | e |   |   |   | f |   |   |
-            | x | a | b |   |   |   | c | d | y |
+            """
+                e       f
+            x a b       c d y
+            """
 
         And the ways
             | nodes | highway          |
@@ -85,14 +93,16 @@ Feature: Car - Speed on links
             | dy    | unclassified     |
 
         When I route I should get
-            | from | to | route          |
-            | x    | y  | xa,ae,ef,fd,dy |
-            | b    | c  | bc             |
+            | from | to | route             |
+            | x    | y  | xa,ae,ef,fd,dy,dy |
+            | b    | c  | bc,bc             |
 
     Scenario: Car - Use tertiary_link when reasonable
         Given the node map
-            |   |   | e |   |   |   | f |   |   |
-            | x | a | b |   |   |   | c | d | y |
+            """
+                e       f
+            x a b       c d y
+            """
 
         And the ways
             | nodes | highway         |
@@ -106,6 +116,6 @@ Feature: Car - Speed on links
             | dy    | unclassified    |
 
         When I route I should get
-            | from | to | route          |
-            | x    | y  | xa,ae,ef,fd,dy |
-            | b    | c  | bc             |
+            | from | to | route             |
+            | x    | y  | xa,ae,ef,fd,dy,dy |
+            | b    | c  | bc,bc             |

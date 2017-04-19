@@ -7,9 +7,11 @@ Feature: Basic Routing
 
     Scenario: Graph transformation
         Given the node map
-            |   |   | d |
-            | a | b | c |
-            |   |   | e |
+            """
+                d
+            a b c
+                e
+            """
 
         And the ways
             | nodes |
@@ -17,17 +19,19 @@ Feature: Basic Routing
             | dce   |
 
         When I route I should get
-            | from | to | route   |
-            | a    | e  | abc,dce |
+            | from | to | route       |
+            | a    | e  | abc,dce,dce |
 
     Scenario: Turn instructions on compressed road network geometry
         Given the node map
-            | x | a |   |   |
-            |   | b |   |   |
-            | f |   |   | e |
-            |   |   |   |   |
-            |   |   |   |   |
-            | y | c |   | d |
+            """
+            x a
+              b
+            f     e
+
+
+            y c   d
+            """
 
         And the ways
             | nodes  | name  |
@@ -36,5 +40,5 @@ Feature: Basic Routing
             | fy     | last  |
 
         When I route I should get
-            | from | to | route            | turns                       |
-            | x    | y  | first,compr,last | head,right,left,destination |
+            | from | to | route                 |
+            | x    | y  | first,compr,last,last |

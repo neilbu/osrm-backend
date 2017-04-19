@@ -6,7 +6,9 @@ Feature: Temporary tests related to osrm-datastore
 
     Scenario: Scenario ab
         Given the node map
-            | a | b |
+            """
+            a b
+            """
 
         And the ways
             | nodes |
@@ -14,12 +16,14 @@ Feature: Temporary tests related to osrm-datastore
 
         When I route I should get
             | from | to | route |
-            | a    | b  | ab    |
-            | b    | a  | ab    |
+            | a    | b  | ab,ab |
+            | b    | a  | ab,ab |
 
     Scenario: Scenaria xy
         Given the node map
-            | x | y |
+            """
+            x y
+            """
 
         And the ways
             | nodes |
@@ -27,5 +31,5 @@ Feature: Temporary tests related to osrm-datastore
 
         When I route I should get
             | from | to | route |
-            | x    | y  | xy    |
-            | y    | x  | xy    |
+            | x    | y  | xy,xy |
+            | y    | x  | xy,xy |

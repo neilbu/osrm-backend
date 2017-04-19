@@ -22,5 +22,22 @@ Feature: Fixed bugs, kept to check for regressions
             | cdec  |
 
         When I route I should get
-            | from | to | route | turns            |
-            | x    | y  | abc   | head,destination |
+            | from | to | route   |
+            | x    | y  | abc,abc |
+
+    Scenario: Step trimming with very short segments
+        Given a grid size of 0.1 meters
+        Given the node map
+            """
+            a 1 b c d 2 e
+            """
+
+        Given the ways
+            | nodes | oneway |
+            | ab    | yes    |
+            | bcd   | yes    |
+            | de    | yes    |
+
+        When I route I should get
+            | from | to | route     |
+            | 1    | 2  | bcd,bcd   |

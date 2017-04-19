@@ -4,6 +4,28 @@ Feature: Avoid weird loops caused by rounding errors
     Background:
         Given the profile "testbot"
 
+    @via
+    Scenario: Weird sidestreet loops
+        Given the node map
+            """
+            a 1 b 2 c 3 d
+
+            e   f   g   h
+            """
+
+       And the ways
+            | nodes  |
+            | aefghd |
+            | abcd   |
+            | bf     |
+            | cg     |
+
+       When I route I should get
+           | waypoints | route               |
+           | a,1,d     | abcd,abcd,abcd,abcd |
+           | a,2,d     | abcd,abcd,abcd,abcd |
+           | a,3,d     | abcd,abcd,abcd,abcd |
+
     Scenario: Avoid weird loops 1
         Given the node locations
             | node | lat        | lon        |
@@ -28,8 +50,8 @@ Feature: Avoid weird loops caused by rounding errors
             | ie    |
 
         When I route I should get
-            | from | to | route | turns            |
-            | x    | y  | hfgd  | head,destination |
+            | from | to | route     |
+            | x    | y  | hfgd,hfgd |
 
     Scenario: Avoid weird loops 2
         Given the node locations
@@ -48,31 +70,35 @@ Feature: Avoid weird loops caused by rounding errors
             | cdec  |
 
         When I route I should get
-            | from | to | route | turns            |
-            | x    | y  | abc   | head,destination |
+            | from | to | route   |
+            | x    | y  | abc,abc |
 
-    @412
+    @412 @via
     Scenario: Avoid weird loops 3
         And the node map
-            | a |   |   |
-            | b | e |   |
-            |   |   | 1 |
-            |   |   |   |
-            |   |   | 2 |
-            |   |   |   |
-            |   | c | f |
-            |   | d |   |
+            """
+            a
+            b e
+            h   1
+
+                2
+            g
+              c f
+            d
+            """
 
         And the ways
-            | nodes | highway   |
-            | ab    | primary   |
-            | bc    | primary   |
-            | cd    | primary   |
-            | be    | secondary |
-            | ef    | secondary |
-            | cf    | secondary |
+            | nodes | highway     |
+            | ab    | residential |
+            | bc    | residential |
+            | cd    | residential |
+            | be    | primary     |
+            | ef    | primary     |
+            | cf    | primary     |
+            | cg    | primary     |
+            | bh    | primary     |
 
         When I route I should get
-            | waypoints | route             | turns                                      |
-            | a,2,d     | ab,be,ef,ef,cf,cd | head,left,right,via,right,left,destination |
-            | a,1,d     | ab,be,ef,ef,cf,cd | head,left,right,via,right,left,destination |
+            | waypoints | route                |
+            | a,2,d     | ab,be,ef,ef,ef,cd,cd |
+            | a,1,d     | ab,be,ef,ef,ef,cd,cd |

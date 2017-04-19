@@ -7,8 +7,10 @@ Feature: Penalties
 
     Scenario: Traffic signals should incur a delay, without changing distance
         Given the node map
-            | a | b | c |
-            | d | e | f |
+            """
+            a b c
+            d e f
+            """
 
         And the nodes
             | node | highway         |
@@ -20,15 +22,17 @@ Feature: Penalties
             | def   |
 
         When I route I should get
-            | from | to | route | time    | distance |
-            | a    | c  | abc   | 20s +-1 | 200m +-1 |
-            | d    | f  | def   | 27s +-1 | 200m +-1 |
+            | from | to | route   | time    | distance |
+            | a    | c  | abc,abc | 20s +-1 | 200m +-1 |
+            | d    | f  | def,def | 27s +-1 | 200m +-1 |
 
     Scenario: Signal penalty should not depend on way type
         Given the node map
-            | a | b | c |
-            | d | e | f |
-            | g | h | i |
+            """
+            a b c
+            d e f
+            g h i
+            """
 
         And the nodes
             | node | highway         |
@@ -43,14 +47,16 @@ Feature: Penalties
             | ghi   | tertiary  |
 
         When I route I should get
-            | from | to | route | time    |
-            | a    | c  | abc   | 27s +-1 |
-            | d    | f  | def   | 47s +-1 |
-            | g    | i  | ghi   | 67s +-1 |
+            | from | to | route   | time    |
+            | a    | c  | abc,abc | 27s +-1 |
+            | d    | f  | def,def | 47s +-1 |
+            | g    | i  | ghi,ghi | 67s +-1 |
 
     Scenario: Passing multiple traffic signals should incur a accumulated delay
         Given the node map
-            | a | b | c | d | e |
+            """
+            a b c d e
+            """
 
         And the nodes
             | node | highway         |
@@ -63,15 +69,17 @@ Feature: Penalties
             | abcde |
 
         When I route I should get
-            | from | to | route | time    |
-            | a    | e  | abcde | 61s +-1 |
+            | from | to | route       | time    |
+            | a    | e  | abcde,abcde | 61s +-1 |
 
         @todo
         Scenario: Signal penalty should not depend on way type
             Given the node map
-                | a | b | c |
-                | d | e | f |
-                | g | h | i |
+                """
+                a b c
+                d e f
+                g h i
+                """
 
             And the nodes
                 | node | highway         |
@@ -86,17 +94,19 @@ Feature: Penalties
                 | ghi   | tertiary  |
 
             When I route I should get
-                | from | to | route | time    |
-                | a    | b  | abc   | 10s +-1 |
-                | a    | c  | abc   | 27s +-1 |
-                | d    | e  | def   | 20s +-1 |
-                | d    | f  | def   | 47s +-1 |
-                | g    | h  | ghi   | 30s +-1 |
-                | g    | i  | ghi   | 67s +-1 |
+                | from | to | route   | time    |
+                | a    | b  | abc,abc | 10s +-1 |
+                | a    | c  | abc,abc | 27s +-1 |
+                | d    | e  | def,def | 20s +-1 |
+                | d    | f  | def,def | 47s +-1 |
+                | g    | h  | ghi,ghi | 30s +-1 |
+                | g    | i  | ghi,ghi | 67s +-1 |
 
         Scenario: Passing multiple traffic signals should incur a accumulated delay
             Given the node map
-                | a | b | c | d | e |
+                """
+                a b c d e
+                """
 
             And the nodes
                 | node | highway         |
@@ -109,13 +119,15 @@ Feature: Penalties
                 | abcde |
 
             When I route I should get
-                | from | to | route | time    |
-                | a    | e  | abcde | 61s +-1 |
+                | from | to | route       | time    |
+                | a    | e  | abcde,abcde | 61s +-1 |
 
     @todo
     Scenario: Starting or ending at a traffic signal should not incur a delay
         Given the node map
-            | a | b | c |
+            """
+            a b c
+            """
 
         And the nodes
             | node | highway         |
@@ -132,7 +144,9 @@ Feature: Penalties
 
     Scenario: Routing between signals on the same way should not incur a delay
         Given the node map
-            | a | b | c | d |
+            """
+            a b c d
+            """
 
         And the nodes
             | node | highway         |
@@ -144,15 +158,17 @@ Feature: Penalties
             | abcd  | primary |
 
         When I route I should get
-            | from | to | route | time    |
-            | b    | c  | abcd  | 10s +-1 |
-            | c    | b  | abcd  | 10s +-1 |
+            | from | to | route     | time    |
+            | b    | c  | abcd,abcd | 10s +-1 |
+            | c    | b  | abcd,abcd | 10s +-1 |
 
     Scenario: Prefer faster route without traffic signals
         Given a grid size of 50 meters
         And the node map
-            | a |  | b |  | c |
-            |   |  | d |  |   |
+            """
+            a   b   c
+                d
+            """
 
         And the nodes
             | node | highway         |
@@ -164,5 +180,5 @@ Feature: Penalties
             | adc   | primary |
 
         When I route I should get
-            | from | to | route |
-            | a    | c  | adc   |
+            | from | to | route   |
+            | a    | c  | adc,adc |

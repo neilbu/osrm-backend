@@ -7,9 +7,11 @@ Feature: Bike - Squares and other areas
     @square
     Scenario: Bike - Route along edge of a squares
         Given the node map
-            | x |   |
-            | a | b |
-            | d | c |
+            """
+            x
+            a b
+            d c
+            """
 
         And the ways
             | nodes | area | highway     |
@@ -17,22 +19,24 @@ Feature: Bike - Squares and other areas
             | abcda | yes  | residential |
 
         When I route I should get
-            | from | to | route |
-            | a    | b  | abcda |
-            | a    | d  | abcda |
-            | b    | c  | abcda |
-            | c    | b  | abcda |
-            | c    | d  | abcda |
-            | d    | c  | abcda |
-            | d    | a  | abcda |
-            | a    | d  | abcda |
+            | from | to | route       |
+            | a    | b  | abcda,abcda |
+            | a    | d  | abcda,abcda |
+            | b    | c  | abcda,abcda |
+            | c    | b  | abcda,abcda |
+            | c    | d  | abcda,abcda |
+            | d    | c  | abcda,abcda |
+            | d    | a  | abcda,abcda |
+            | a    | d  | abcda,abcda |
 
     @building
     Scenario: Bike - Don't route on buildings
         Given the node map
-            | x |   |
-            | a | b |
-            | d | c |
+            """
+            x
+            a b
+            d c
+            """
 
         And the ways
             | nodes | highway | area | building | access |
@@ -41,21 +45,23 @@ Feature: Bike - Squares and other areas
 
         When I route I should get
             | from | to | route |
-            | a    | b  | xa    |
-            | a    | d  | xa    |
-            | b    | c  | xa    |
-            | c    | b  | xa    |
-            | c    | d  | xa    |
-            | d    | c  | xa    |
-            | d    | a  | xa    |
-            | a    | d  | xa    |
+            | a    | b  | xa,xa |
+            | a    | d  | xa,xa |
+            | b    | c  | xa,xa |
+            | c    | b  | xa,xa |
+            | c    | d  | xa,xa |
+            | d    | c  | xa,xa |
+            | d    | a  | xa,xa |
+            | a    | d  | xa,xa |
 
     @parking
     Scenario: Bike - parking areas
         Given the node map
-            | e |   |   | f |
-            | x | a | b | y |
-            |   | d | c |   |
+            """
+            e     f
+            x a b y
+              d c
+            """
 
         And the ways
             | nodes | highway | amenity |
@@ -68,20 +74,23 @@ Feature: Bike - Squares and other areas
             | from | to | route       |
             | x    | y  | xa,abcda,by |
             | y    | x  | by,abcda,xa |
-            | a    | b  | abcda       |
-            | a    | d  | abcda       |
-            | b    | c  | abcda       |
-            | c    | b  | abcda       |
-            | c    | d  | abcda       |
-            | d    | c  | abcda       |
-            | d    | a  | abcda       |
-            | a    | d  | abcda       |
+            | a    | b  | abcda,abcda |
+            | a    | d  | abcda,abcda |
+            | b    | c  | abcda,abcda |
+            | c    | b  | abcda,abcda |
+            | c    | d  | abcda,abcda |
+            | d    | c  | abcda,abcda |
+            | d    | a  | abcda,abcda |
+            | a    | d  | abcda,abcda |
+
 
     @train @platform
     Scenario: Bike - railway platforms
         Given the node map
-            | x | a | b | y |
-            |   | d | c |   |
+            """
+            x a b y
+              d c
+            """
 
         And the ways
             | nodes | highway | railway  |
@@ -93,11 +102,11 @@ Feature: Bike - Squares and other areas
             | from | to | route       |
             | x    | y  | xa,abcda,by |
             | y    | x  | by,abcda,xa |
-            | a    | b  | abcda       |
-            | a    | d  | abcda       |
-            | b    | c  | abcda       |
-            | c    | b  | abcda       |
-            | c    | d  | abcda       |
-            | d    | c  | abcda       |
-            | d    | a  | abcda       |
-            | a    | d  | abcda       |
+            | a    | b  | abcda,abcda |
+            | a    | d  | abcda,abcda |
+            | b    | c  | abcda,abcda |
+            | c    | b  | abcda,abcda |
+            | c    | d  | abcda,abcda |
+            | d    | c  | abcda,abcda |
+            | d    | a  | abcda,abcda |
+            | a    | d  | abcda,abcda |

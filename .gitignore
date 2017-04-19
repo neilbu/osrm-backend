@@ -1,3 +1,14 @@
+# mason #
+#########
+/.mason
+/mason_packages
+
+# pre compiled dependencies #
+#############################
+osrm-deps
+
+.ycm_extra_conf.py
+
 # Compiled source #
 ###################
 *.com
@@ -36,8 +47,11 @@ Thumbs.db
 # build related files #
 #######################
 /build/
-/Util/finger_print.cpp
-/Util/git_sha.cpp
+/example/build/
+/test/data/monaco*
+/test/data/ch
+/test/data/corech
+/test/data/mld
 /cmake/postinst
 
 # Eclipse related files #
@@ -53,25 +67,8 @@ Thumbs.db
 stxxl.log
 stxxl.errlog
 
-# compiled protobuffers #
-#########################
-/DataStructures/pbf-proto/*.pb.h
-/DataStructures/pbf-proto/*.pb.cc
-
-# External Libs #
-#################
-/lib/
-/win/lib
-
-# Visual Studio Temp + build Files #
+# Compiled Binary Files #
 ####################################
-/win/*.user
-/win/*.ncb
-/win/*.suo
-/win/Debug/
-/win/Release/
-/win/bin/
-/win/bin-debug/
 /osrm-extract
 /osrm-io-benchmark
 /osrm-components
@@ -88,8 +85,22 @@ stxxl.errlog
 ###################
 /sandbox/
 
+# Test related files #
+######################
 /test/profile.lua
+/test/cache
+/test/speeds.csv
+/test/penalties.csv
+node_modules
 
 # Deprecated config file #
 ##########################
 /server.ini
+
+*.swp
+
+# local lua debugging file
+debug.lua
+
+# node-osrm artifacts
+lib/binding

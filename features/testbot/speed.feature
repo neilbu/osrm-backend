@@ -19,13 +19,15 @@ Feature: Testbot - speeds
 
     Scenario: Testbot - Speed on rivers, map
         Given the node map
-            | a | b |
+            """
+            a b
+            """
 
         And the ways
             | nodes | highway |
             | ab    | river   |
 
         When I route I should get
-            | from | to | route | speed        | time | distance |
-            | a    | b  | ab    | 36 km/h      | 10s  | 100m     |
-            | b    | a  | ab    | 16 km/h +- 1 | 23s  | 100m     |
+            | from | to | route | speed        | time    | distance  |
+            | a    | b  | ab,ab | 36 km/h      | 10s +-1 | 100m +- 1 |
+            | b    | a  | ab,ab | 16 km/h +- 1 | 23s +-1 | 100m +- 1 |

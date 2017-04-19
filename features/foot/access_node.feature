@@ -5,7 +5,7 @@ Feature: Foot - Access tags on nodes
     Background:
         Given the profile "foot"
 
-    Scenario: Foot - Access tag hierachy on nodes
+    Scenario: Foot - Access tag hierarchy on nodes
         Then routability should be
             | node/access | node/foot | bothw |
             |             |           | x     |
@@ -39,7 +39,8 @@ Feature: Foot - Access tags on nodes
             | no           |              |       |
             | private      |              |       |
             | agricultural |              |       |
-            | forestery    |              |       |
+            | forestry     |              |       |
+            | delivery     |              |       |
             | no           | yes          | x     |
             | no           | permissive   | x     |
             | no           | designated   | x     |
@@ -47,4 +48,5 @@ Feature: Foot - Access tags on nodes
             | yes          | no           |       |
             | yes          | private      |       |
             | yes          | agricultural |       |
-            | yes          | forestery    |       |
+            | yes          | forestry     |       |
+            | yes          | delivery     |       |

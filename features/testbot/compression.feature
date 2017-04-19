@@ -6,9 +6,11 @@ Feature: Geometry Compression
 
     Scenario: Compressed segments have correct order
         Given the node map
-            | a |   | d |   |   |   | h |
-            | b |   |   |   | e |   | f |
-            |   | c |   |   |   |   | g |
+            """
+            a   d       h
+            b       e   f
+              c         g
+            """
 
         And the ways
             | nodes  |
@@ -17,6 +19,6 @@ Feature: Geometry Compression
             | fg     |
 
         When I route I should get
-            | from | to | route   | distance | speed   |
-            | b    | e  | abcdef  | 589m     | 35 km/h |
-            | e    | b  | abcdef  | 589m     | 35 km/h |
+            | from | to | route         | distance | speed   |
+            | b    | e  | abcdef,abcdef | 588.5m   | 36 km/h |
+            | e    | b  | abcdef,abcdef | 588.5m   | 36 km/h |

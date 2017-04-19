@@ -1,211 +1,259 @@
 -- Foot profile
 
-require("lib/access")
+api_version = 1
 
-barrier_whitelist = { [""] = true, ["cycle_barrier"] = true, ["bollard"] = true, ["entrance"] = true, ["cattle_grid"] = true, ["border_control"] = true, ["toll_booth"] = true, ["sally_port"] = true, ["gate"] = true, ["no"] = true}
-access_tag_whitelist = { ["yes"] = true, ["foot"] = true, ["permissive"] = true, ["designated"] = true  }
-access_tag_blacklist = { ["no"] = true, ["private"] = true, ["agricultural"] = true, ["forestery"] = true }
-access_tag_restricted = { ["destination"] = true, ["delivery"] = true }
-access_tags_hierachy = { "foot", "access" }
-service_tag_restricted = { ["parking_aisle"] = true }
-ignore_in_grid = { ["ferry"] = true }
-restriction_exception_tags = { "foot" }
+local find_access_tag = require("lib/access").find_access_tag
+local Set = require('lib/set')
+local Sequence = require('lib/sequence')
+local Handlers = require("lib/handlers")
+local next = next       -- bind to local for speed
 
-walking_speed = 5
+properties.max_speed_for_map_matching    = 40/3.6 -- kmph -> m/s
+properties.use_turn_restrictions         = false
+properties.continue_straight_at_waypoint = false
+properties.weight_name                   = 'duration'
+--properties.weight_name                   = 'routability'
 
-speeds = {
-  ["primary"] = walking_speed,
-  ["primary_link"] = walking_speed,
-  ["secondary"] = walking_speed,
-  ["secondary_link"] = walking_speed,
-  ["tertiary"] = walking_speed,
-  ["tertiary_link"] = walking_speed,
-  ["unclassified"] = walking_speed,
-  ["residential"] = walking_speed,
-  ["road"] = walking_speed,
-  ["living_street"] = walking_speed,
-  ["service"] = walking_speed,
-  ["track"] = walking_speed,
-  ["path"] = walking_speed,
-  ["steps"] = walking_speed,
-  ["pedestrian"] = walking_speed,
-  ["footway"] = walking_speed,
-  ["pier"] = walking_speed,
-  ["default"] = walking_speed
+local walking_speed = 5
+
+local profile = {
+  default_mode            = mode.walking,
+  default_speed           = walking_speed,
+  oneway_handling         = 'specific',     -- respect 'oneway:foot' but not 'oneway'
+  traffic_light_penalty   = 2,
+  u_turn_penalty          = 2,
+
+  barrier_whitelist = Set {
+    'cycle_barrier',
+    'bollard',
+    'entrance',
+    'cattle_grid',
+    'border_control',
+    'toll_booth',
+    'sally_port',
+    'gate',
+    'no',
+    'kerb',
+    'block'
+  },
+
+  access_tag_whitelist = Set {
+    'yes',
+    'foot',
+    'permissive',
+    'designated'
+  },
+
+  access_tag_blacklist = Set {
+    'no',
+    'agricultural',
+    'forestry',
+    'private',
+    'delivery',
+  },
+
+  restricted_access_tag_list = Set { },
+
+  restricted_highway_whitelist = Set { },
+
+  access_tags_hierarchy = Sequence {
+    'foot',
+    'access'
+  },
+
+  restrictions = Sequence {
+    'foot'
+  },
+
+  -- list of suffixes to suppress in name change instructions
+  suffix_list = Set {
+    'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'North', 'South', 'West', 'East'
+  },
+
+  avoid = Set {
+    'impassable'
+  },
+
+  speeds = Sequence {
+    highway = {
+      primary         = walking_speed,
+      primary_link    = walking_speed,
+      secondary       = walking_speed,
+      secondary_link  = walking_speed,
+      tertiary        = walking_speed,
+      tertiary_link   = walking_speed,
+      unclassified    = walking_speed,
+      residential     = walking_speed,
+      road            = walking_speed,
+      living_street   = walking_speed,
+      service         = walking_speed,
+      track           = walking_speed,
+      path            = walking_speed,
+      steps           = walking_speed,
+      pedestrian      = walking_speed,
+      footway         = walking_speed,
+      pier            = walking_speed,
+    },
+
+    railway = {
+      platform        = walking_speed
+    },
+
+    amenity = {
+      parking         = walking_speed,
+      parking_entrance= walking_speed
+    },
+
+    man_made = {
+      pier            = walking_speed
+    },
+
+    leisure = {
+      track           = walking_speed
+    }
+  },
+
+  route_speeds = {
+    ferry = 5
+  },
+
+  bridge_speeds = {
+  },
+
+  surface_speeds = {
+    fine_gravel =   walking_speed*0.75,
+    gravel =        walking_speed*0.75,
+    pebblestone =   walking_speed*0.75,
+    mud =           walking_speed*0.5,
+    sand =          walking_speed*0.5
+  },
+
+  tracktype_speeds = {
+  },
+
+  smoothness_speeds = {
+  }
 }
 
-route_speeds = {
-	["ferry"] = 5
-}
-
-platform_speeds = {
-	["platform"] = walking_speed
-}
-
-amenity_speeds = {
-	["parking"] = walking_speed,
-	["parking_entrance"] = walking_speed
-}
-
-man_made_speeds = {
-	["pier"] = walking_speed
-}
-
-surface_speeds = {
-	["fine_gravel"] =   walking_speed*0.75,
-	["gravel"] =        walking_speed*0.75,
-	["pebbelstone"] =   walking_speed*0.75,
-	["mud"] =           walking_speed*0.5,
-	["sand"] =          walking_speed*0.5
-}
-
-traffic_signal_penalty 	= 2
-u_turn_penalty 			= 2
-use_turn_restrictions   = false
-
---modes
-local mode_normal = 1
-local mode_ferry = 2
-
-function get_exceptions(vector)
-	for i,v in ipairs(restriction_exception_tags) do
-		vector:Add(v)
-	end
-end
 
 function node_function (node, result)
-	local barrier = node:get_value_by_key("barrier")
-	local access = Access.find_access_tag(node, access_tags_hierachy)
-	local traffic_signal = node:get_value_by_key("highway")
+  -- parse access and barrier tags
+  local access = find_access_tag(node, profile.access_tags_hierarchy)
+  if access then
+    if profile.access_tag_blacklist[access] then
+      result.barrier = true
+    end
+  else
+    local barrier = node:get_value_by_key("barrier")
+    if barrier then
+      --  make an exception for rising bollard barriers
+      local bollard = node:get_value_by_key("bollard")
+      local rising_bollard = bollard and "rising" == bollard
 
-	-- flag node if it carries a traffic light
-	if traffic_signal and traffic_signal == "traffic_signals" then
-		result.traffic_light = true
-	end
+      if not profile.barrier_whitelist[barrier] and not rising_bollard then
+        result.barrier = true
+      end
+    end
+  end
 
-	-- parse access and barrier tags
-	if access and access ~= "" then
-		if access_tag_blacklist[access] then
-			result.barrier = true
-		else
-			result.barrier = false
-		end
-	elseif barrier and barrier ~= "" then
-		if barrier_whitelist[barrier] then
-			result.barrier = false
-		else
-			result.barrier = true
-		end
-	end
-
-	return 1
+  -- check if node is a traffic light
+  local tag = node:get_value_by_key("highway")
+  if "traffic_signals" == tag then
+    result.traffic_lights = true
+  end
 end
 
-function way_function (way, result)
-	-- initial routability check, filters out buildings, boundaries, etc
-	local highway = way:get_value_by_key("highway")
-	local route = way:get_value_by_key("route")
-	local man_made = way:get_value_by_key("man_made")
-	local railway = way:get_value_by_key("railway")
-	local amenity = way:get_value_by_key("amenity")
-	local public_transport = way:get_value_by_key("public_transport")
-	if (not highway or highway == '') and
-		(not route or route == '') and
-		(not railway or railway=='') and
-		(not amenity or amenity=='') and
-		(not man_made or man_made=='') and
-		(not public_transport or public_transport=='')
-		then
-		return
-    end
+-- main entry point for processsing a way
+function way_function(way, result)
+  -- the intial filtering of ways based on presence of tags
+  -- affects processing times significantly, because all ways
+  -- have to be checked.
+  -- to increase performance, prefetching and intial tag check
+  -- is done in directly instead of via a handler.
 
-    -- don't route on ways that are still under construction
-    if highway=='construction' then
-        return
-    end
+  -- in general we should  try to abort as soon as
+  -- possible if the way is not routable, to avoid doing
+  -- unnecessary work. this implies we should check things that
+  -- commonly forbids access early, and handle edge cases later.
 
-	-- access
-    local access = Access.find_access_tag(way, access_tags_hierachy)
-    if access_tag_blacklist[access] then
-		return
-    end
+  -- data table for storing intermediate values during processing
+  local data = {
+    -- prefetch tags
+    highway = way:get_value_by_key('highway'),
+    bridge = way:get_value_by_key('bridge'),
+    route = way:get_value_by_key('route'),
+    leisure = way:get_value_by_key('leisure'),
+    man_made = way:get_value_by_key('man_made'),
+    railway = way:get_value_by_key('railway'),
+    platform = way:get_value_by_key('platform'),
+    amenity = way:get_value_by_key('amenity'),
+    public_transport = way:get_value_by_key('public_transport')
+  }
 
-	local name = way:get_value_by_key("name")
-	local ref = way:get_value_by_key("ref")
-	local junction = way:get_value_by_key("junction")
-	local onewayClass = way:get_value_by_key("oneway:foot")
-	local duration	= way:get_value_by_key("duration")
-	local service	= way:get_value_by_key("service")
-	local area = way:get_value_by_key("area")
-	local foot = way:get_value_by_key("foot")
-	local surface = way:get_value_by_key("surface")
+  -- perform an quick initial check and abort if the way is
+  -- obviously not routable. here we require at least one
+  -- of the prefetched tags to be present, ie. the data table
+  -- cannot be empty
+  if next(data) == nil then     -- is the data table empty?
+    return
+  end
 
- 	-- name
-	if ref and "" ~= ref and name and "" ~= name then
-		result.name = name .. ' / ' .. ref
-    elseif ref and "" ~= ref then
-    	result.name = ref
-	elseif name and "" ~= name then
-		result.name = name
-	elseif highway then
-		result.name = "{highway:"..highway.."}"	-- if no name exists, use way type
-		                                        -- this encoding scheme is excepted to be a temporary solution
-	end
+  local handlers = Sequence {
+    -- set the default mode for this profile. if can be changed later
+    -- in case it turns we're e.g. on a ferry
+    'handle_default_mode',
 
-    -- roundabouts
-	if "roundabout" == junction then
-	  result.roundabout = true;
-	end
+    -- check various tags that could indicate that the way is not
+    -- routable. this includes things like status=impassable,
+    -- toll=yes and oneway=reversible
+    'handle_blocked_ways',
 
-    -- speed
-    if route_speeds[route] then
-		-- ferries (doesn't cover routes tagged using relations)
-		result.ignore_in_grid = true
-		if duration and durationIsValid(duration) then
-			result.duration = math.max( 1, parseDuration(duration) )
-		else
-			result.forward_speed = route_speeds[route]
-			result.backward_speed = route_speeds[route]
-		end
-		result.forward_mode = mode_ferry
-		result.backward_mode = mode_ferry
-	elseif railway and platform_speeds[railway] then
-		-- railway platforms (old tagging scheme)
-		result.forward_speed = platform_speeds[railway]
-		result.backward_speed = platform_speeds[railway]
-	elseif platform_speeds[public_transport] then
-		-- public_transport platforms (new tagging platform)
-		result.forward_speed = platform_speeds[public_transport]
-		result.backward_speed = platform_speeds[public_transport]
-	elseif amenity and amenity_speeds[amenity] then
-		-- parking areas
-		result.forward_speed = amenity_speeds[amenity]
-		result.backward_speed = amenity_speeds[amenity]
-	elseif speeds[highway] then
-		-- regular ways
-		result.forward_speed = speeds[highway]
-		result.backward_speed = speeds[highway]
-	elseif access and access_tag_whitelist[access] then
-	    -- unknown way, but valid access tag
-		result.forward_speed = walking_speed
-		result.backward_speed = walking_speed
-    end
+    -- determine access status by checking our hierarchy of
+    -- access tags, e.g: motorcar, motor_vehicle, vehicle
+    'handle_access',
 
-	-- oneway
-	if onewayClass == "yes" or onewayClass == "1" or onewayClass == "true" then
-		result.backward_mode = 0
-	elseif onewayClass == "no" or onewayClass == "0" or onewayClass == "false" then
-		-- nothing to do
-	elseif onewayClass == "-1" then
-		result.forward_mode = 0
-    end
+    -- check whether forward/backward directons are routable
+    'handle_oneway',
 
-    -- surfaces
-    if surface then
-        surface_speed = surface_speeds[surface]
-        if surface_speed then
-            result.forward_speed = math.min(result.forward_speed, surface_speed)
-            result.backward_speed  = math.min(result.backward_speed, surface_speed)
-        end
-    end
+    -- check whether forward/backward directons are routable
+    'handle_destinations',
+
+    -- check whether we're using a special transport mode
+    'handle_ferries',
+    'handle_movables',
+
+    -- compute speed taking into account way type, maxspeed tags, etc.
+    'handle_speed',
+    'handle_surface',
+
+    -- handle turn lanes and road classification, used for guidance
+    'handle_classification',
+
+    -- handle various other flags
+    'handle_roundabouts',
+    'handle_startpoint',
+
+    -- set name, ref and pronunciation
+    'handle_names'
+  }
+
+  Handlers.run(handlers,way,result,data,profile)
+end
+
+function turn_function (turn)
+  turn.duration = 0.
+
+  if turn.direction_modifier == direction_modifier.u_turn then
+     turn.duration = turn.duration + profile.u_turn_penalty
+  end
+
+  if turn.has_traffic_light then
+     turn.duration = profile.traffic_light_penalty
+  end
+  if properties.weight_name == 'routability' then
+      -- penalize turns from non-local access only segments onto local access only tags
+      if not turn.source_restricted and turn.target_restricted then
+          turn.weight = turn.weight + 3000
+      end
+  end
 end

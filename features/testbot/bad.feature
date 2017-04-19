@@ -6,31 +6,37 @@ Feature: Handle bad data in a graceful manner
 
     Scenario: Empty dataset
         Given the node map
-            |  |
+            """
+
+            """
 
         Given the ways
             | nodes |
 
-        When the data has been prepared
-        Then "osrm-extract" should return code 1
+        When I try to run "osrm-extract {osm_file} --profile {profile_file}"
+        Then it should exit with an error
 
     Scenario: Only dead-end oneways
         Given the node map
-            | a | b | c | d | e |
+            """
+            a b c d e
+            """
 
         Given the ways
             | nodes | oneway |
             | abcde | yes    |
 
         When I route I should get
-            | from | to | route |
-            | b    | d  | abcde |
+            | from | to | route       |
+            | b    | d  | abcde,abcde |
 
     @todo
     Scenario: Start/end point at the same location
         Given the node map
-            | a | b |
-            | 1 | 2 |
+            """
+            a b
+            1 2
+            """
 
         Given the ways
             | nodes |
@@ -78,7 +84,7 @@ Feature: Handle bad data in a graceful manner
         # | b    | c  | cd    |
         # | a    | d  | cd    |
         # | c    | d  | cd    |
-            | d    | e  | de    |
+            | d    | e  | de,de |
         # | k    | l  | kl    |
         # | l    | m  | lm    |
         # | o    | l  | lm    |

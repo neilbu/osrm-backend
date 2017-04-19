@@ -6,22 +6,26 @@ Feature: Bike - Street names in instructions
 
     Scenario: Bike - A named street
         Given the node map
-            | a | b |
-            |   | c |
+            """
+            a b
+              c
+            """
 
         And the ways
-            | nodes | name     |
-            | ab    | My Way   |
-            | bc    | Your Way |
+            | nodes | name     | ref |
+            | ab    | My Way   | A6  |
+            | bc    | Your Way | A7  |
 
         When I route I should get
-            | from | to | route           |
-            | a    | c  | My Way,Your Way |
+            | from | to | route           | ref   |
+            | a    | c  | My Way,Your Way | A6,A7 |
 
     @unnamed
-    Scenario: Bike - Use way type to describe unnamed ways
+    Scenario: Bike - No longer use way type to describe unnamed ways, see #3231
         Given the node map
-            | a | b | c | d |
+            """
+            a b c d
+            """
 
         And the ways
             | nodes | highway  | name |
@@ -29,5 +33,5 @@ Feature: Bike - Street names in instructions
             | bcd   | track    |      |
 
         When I route I should get
-            | from | to | route                              |
-            | a    | d  | {highway:cycleway},{highway:track} |
+            | from | to | route |
+            | a    | d  | ,     |

@@ -6,7 +6,9 @@ Feature: Status messages
 
     Scenario: Route found
         Given the node map
-            | a | b |
+            """
+            a b
+            """
 
         Given the ways
             | nodes |
@@ -14,14 +16,16 @@ Feature: Status messages
 
         When I route I should get
             | from | to | route | status | message                    |
-            | a    | b  | ab    | 0      | Found route between points |
-            | b    | a  | ab    | 0      | Found route between points |
+            | a    | b  | ab,ab | 200    |                            |
+            | b    | a  | ab,ab | 200    |                            |
 
     Scenario: No route found
         Given the node map
-            | a | b |
-            |   |   |
-            | c | d |
+            """
+            a b
+
+            c d
+            """
 
         Given the ways
             | nodes |
@@ -30,38 +34,40 @@ Feature: Status messages
 
         When I route I should get
             | from | to | route | status | message                          |
-            | a    | b  | ab    | 0      | Found route between points       |
-            | c    | d  | cd    | 0      | Found route between points       |
-            | a    | c  |       | 207    | Cannot find route between points |
-            | b    | d  |       | 207    | Cannot find route between points |
+            | a    | b  | ab,ab | 200    |                                  |
+            | c    | d  | cd,cd | 200    |                                  |
+            | a    | c  |       | 400    | Impossible route between points  |
+            | b    | d  |       | 400    | Impossible route between points  |
 
     Scenario: Malformed requests
         Given the node locations
             | node | lat  | lon  |
             | a    | 1.00 | 1.00 |
-            | b    | 1.01 | 1.00 |
+            | b    | 2.00 | 1.00 |
 
         And the ways
             | nodes |
             | ab    |
 
         When I route I should get
-            | request                     | status | message                                    |
-            | viaroute?loc=1,1&loc=1.01,1 | 0      | Found route between points                 |
-            | nonsense                    | 400    | Bad Request                                |
-            | nonsense?loc=1,1&loc=1.01,1 | 400    | Bad Request                                |
-            |                             | 400    | Query string malformed close to position 0 |
-            | /                           | 400    | Query string malformed close to position 0 |
-            | ?                           | 400    | Query string malformed close to position 0 |
-            | viaroute/loc=               | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1              | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1            | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1,1          | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=x              | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=x,y            | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=       | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=1      | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=1,1    | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=1,1,1  | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=x      | 400    | Query string malformed close to position 9 |
-            | viaroute/loc=1,1&loc=x,y    | 400    | Query string malformed close to position 9 |
+            | request                             | status | message                                           |
+            | route/v1/driving/1,1;1,2            | 200    |                                                   |
+            | route/v1/driving/-74697224,5.191564 | 400    | Query string malformed close to position 18       |
+            | route/v1/driving/200,5.191564;44,5  | 400    | Invalid coordinate value.                         |
+            | nonsense                            | 400    | URL string malformed close to position 9: "nse"   |
+            | nonsense/v1/driving/1,1;1,2         | 400    | Service nonsense not found!                       |
+            |                                     | 400    | URL string malformed close to position 1: "/"     |
+            | /                                   | 400    | URL string malformed close to position 1: "//"    |
+            | ?                                   | 400    | URL string malformed close to position 1: "/?"    |
+            | route/v1/driving                    | 400    | URL string malformed close to position 17: "ing"  |
+            | route/v1/driving/                   | 400    | URL string malformed close to position 18: "ng/"  |
+            | route/v1/driving/1                  | 400    | Query string malformed close to position 19       |
+            | route/v1/driving/1,1                | 400    | Number of coordinates needs to be at least two.   |
+            | route/v1/driving/1,1,1              | 400    | Query string malformed close to position 21       |
+            | route/v1/driving/x                  | 400    | Query string malformed close to position 18       |
+            | route/v1/driving/x,y                | 400    | Query string malformed close to position 18       |
+            | route/v1/driving/1,1;               | 400    | Query string malformed close to position 21       |
+            | route/v1/driving/1,1;1              | 400    | Query string malformed close to position 23       |
+            | route/v1/driving/1,1;1,1,1          | 400    | Query string malformed close to position 25       |
+            | route/v1/driving/1,1;x              | 400    | Query string malformed close to position 21       |
+            | route/v1/driving/1,1;x,y            | 400    | Query string malformed close to position 21       |

@@ -3,15 +3,18 @@ Feature: Testbot - oneways
 
     Background:
         Given the profile "testbot"
+        Given a grid size of 250 meters
 
     Scenario: Routing on a oneway roundabout
         Given the node map
-        |   |   |   |   | v |   |
-        | x |   | d | c |   |   |
-        |   | e |   |   | b |   |
-        |   | f |   |   | a |   |
-        |   |   | g | h |   | y |
-        |   | z |   |   |   |   |
+        """
+                v
+        x   d c
+          e     b
+          f     a
+            g h   y
+          z
+        """
 
         And the ways
             | nodes | oneway |
@@ -29,23 +32,23 @@ Feature: Testbot - oneways
             | xe    | yes    |
 
         When I route I should get
-            | from | to | route                |
-            | a    | b  | ab                   |
-            | b    | c  | bc                   |
-            | c    | d  | cd                   |
-            | d    | e  | de                   |
-            | e    | f  | ef                   |
-            | f    | g  | fg                   |
-            | g    | h  | gh                   |
-            | h    | a  | ha                   |
-            | b    | a  | bc,cd,de,ef,fg,gh,ha |
-            | c    | b  | cd,de,ef,fg,gh,ha,ab |
-            | d    | c  | de,ef,fg,gh,ha,ab,bc |
-            | e    | d  | ef,fg,gh,ha,ab,bc,cd |
-            | f    | e  | fg,gh,ha,ab,bc,cd,de |
-            | g    | f  | gh,ha,ab,bc,cd,de,ef |
-            | h    | g  | ha,ab,bc,cd,de,ef,fg |
-            | a    | h  | ab,bc,cd,de,ef,fg,gh |
+            | from | to | route                   |
+            | a    | b  | ab,ab                   |
+            | b    | c  | bc,bc                   |
+            | c    | d  | cd,cd                   |
+            | d    | e  | de,de                   |
+            | e    | f  | ef,ef                   |
+            | f    | g  | fg,fg                   |
+            | g    | h  | gh,gh                   |
+            | h    | a  | ha,ha                   |
+            | b    | a  | bc,cd,de,ef,fg,gh,ha,ha |
+            | c    | b  | cd,de,ef,fg,gh,ha,ab,ab |
+            | d    | c  | de,ef,fg,gh,ha,ab,bc,bc |
+            | e    | d  | ef,fg,gh,ha,ab,bc,cd,cd |
+            | f    | e  | fg,gh,ha,ab,bc,cd,de,de |
+            | g    | f  | gh,ha,ab,bc,cd,de,ef,ef |
+            | h    | g  | ha,ab,bc,cd,de,ef,fg,fg |
+            | a    | h  | ab,bc,cd,de,ef,fg,gh,gh |
 
     Scenario: Testbot - Simple oneway
         Then routability should be
@@ -59,8 +62,10 @@ Feature: Testbot - oneways
 
     Scenario: Testbot - Around the Block
         Given the node map
-            | a | b |
-            | d | c |
+            """
+              a b
+            e d c f
+            """
 
         And the ways
             | nodes | oneway | foot |
@@ -68,11 +73,13 @@ Feature: Testbot - oneways
             | bc    |        | no   |
             | cd    |        | no   |
             | da    |        | no   |
+            | de    |        | no   |
+            | cf    |        | no   |
 
         When I route I should get
-            | from | to | route    |
-            | a    | b  | ab       |
-            | b    | a  | bc,cd,da |
+            | from | to | route       |
+            | a    | b  | ab,ab       |
+            | b    | a  | bc,cd,da,da |
 
     Scenario: Testbot - Handle various oneway tag values
         Then routability should be
@@ -89,7 +96,9 @@ Feature: Testbot - oneways
 
     Scenario: Testbot - Two consecutive oneways
         Given the node map
-            | a | b | c |
+            """
+            a b c
+            """
 
         And the ways
             | nodes | oneway |
@@ -98,5 +107,5 @@ Feature: Testbot - oneways
 
 
         When I route I should get
-            | from | to | route |
-            | a    | c  | ab,bc |
+            | from | to | route    |
+            | a    | c  | ab,bc,bc |

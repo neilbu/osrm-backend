@@ -15,26 +15,46 @@ Feature: Car - Oneway streets
             | highway | oneway | forw | backw |
             | primary | -1     |      | x     |
 
+    Scenario: Car - Mode specific oneway
+        Then routability should be
+            | highway | oneway:motorcar | oneway:motor_vehicle | oneway:vehicle | oneway | forw | backw |
+            | primary |                 |                      |                |        | x    | x     |
+            | primary | yes             |                      |                |        | x    |       |
+            | primary |                 | yes                  |                |        | x    |       |
+            | primary |                 |                      | yes            |        | x    |       |
+            | primary |                 |                      |                | yes    | x    |       |
+            | primary | yes             | no                   |                |        | x    |       |
+            | primary |                 | yes                  | no             |        | x    |       |
+            | primary |                 |                      | yes            | no     | x    |       |
+            | primary |                 |                      |                | yes    | x    |       |
+            | primary | no              | yes                  |                |        | x    | x     |
+            | primary |                 | no                   | yes            |        | x    | x     |
+            | primary |                 |                      | no             | yes    | x    | x     |
+
     Scenario: Car - Implied oneways
         Then routability should be
-            | highway       | junction   | forw | backw |
-            | motorway      |            | x    |       |
-            | motorway_link |            | x    |       |
-            | primary       |            | x    | x     |
-            | motorway      | roundabout | x    |       |
-            | motorway_link | roundabout | x    |       |
-            | primary       | roundabout | x    |       |
+            | highway         | junction   | forw | backw | #                     |
+            | motorway        |            | x    |       |                       |
+            | motorway_link   |            | x    | x     | does not imply oneway |
+            | primary         |            | x    | x     |                       |
+            | motorway        | roundabout | x    |       |                       |
+            | motorway_link   | roundabout | x    |       |                       |
+            | primary         | roundabout | x    |       |                       |
 
     Scenario: Car - Overrule implied oneway
         Then routability should be
-            | highway       | oneway | forw | backw |
-            | motorway      | no     | x    | x     |
-            | motorway_link | no     | x    | x     |
+            | highway       | oneway | forw | backw | #                    |
+            | motorway      | no     | x    | x     |                      |
+            | motorway_link | no     | x    | x     |                      |
+            | motorway_link | yes    | x    |       |                      |
+            | motorway_link |        | x    | x     | does not imply onway |
 
     Scenario: Car - Around the Block
         Given the node map
-            | a | b |
-            | d | c |
+            """
+              a b
+            f d c e
+            """
 
         And the ways
             | nodes | oneway |
@@ -42,11 +62,13 @@ Feature: Car - Oneway streets
             | bc    |        |
             | cd    |        |
             | da    |        |
+            | ce    |        |
+            | df    |        |
 
         When I route I should get
-            | from | to | route    |
-            | a    | b  | ab       |
-            | b    | a  | bc,cd,da |
+            | from | to | route       |
+            | a    | b  | ab,ab       |
+            | b    | a  | bc,cd,da,da |
 
     Scenario: Car - Cars should not be affected by bicycle tags
         Then routability should be
@@ -66,7 +88,9 @@ Feature: Car - Oneway streets
 
     Scenario: Car - Two consecutive oneways
         Given the node map
-            | a | b | c |
+            """
+            a b   c
+            """
 
         And the ways
             | nodes | oneway |
@@ -75,5 +99,14 @@ Feature: Car - Oneway streets
 
 
         When I route I should get
-            | from | to | route |
-            | a    | c  | ab,bc |
+            | from | to | route    |
+            | a    | c  | ab,bc,bc |
+
+
+    # Reversible oneways (low frequency) vs alternating oneways (high frequency).
+    # See: https://github.com/Project-OSRM/osrm-backend/issues/2837
+    Scenario: Car - Route over alternating but not reversible oneways
+        Then routability should be
+            | highway | oneway      | forw | backw |
+            | primary | reversible  |      |       |
+            | primary | alternating | x    | x     |

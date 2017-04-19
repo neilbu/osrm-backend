@@ -4,8 +4,8 @@ Feature: osrm-routed command line options: files
 # For testing program options, the --trial option is used, which causes osrm-routed to quit
 # immediately after initialization. This makes testing easier and faster.
 # 
-# The {prepared_base} part of the options to osrm-routed will be expanded to the actual base path of
-# the prepared input file.
+# The {contracted_base} part of the options to osrm-routed will be expanded to the actual base path of
+# the contracted input file.
 
 # TODO
 # Since we're not using osmr-datastore for all testing, osrm-routed is kept running.
@@ -15,18 +15,20 @@ Feature: osrm-routed command line options: files
     Background:
         Given the profile "testbot"
         And the node map
-            | a | b |
+            """
+            a b
+            """
         And the ways
             | nodes |
             | ab    |
-        And the data has been prepared
+        And the data has been contracted
 
     Scenario: osrm-routed - Passing base file
-        When I run "osrm-routed {prepared_base}.osrm --trial"
+        When I run "osrm-routed {contracted_base}.osrm --trial"
         Then stdout should contain /^\[info\] starting up engines/
         And stdout should contain /\d{1,2}\.\d{1,2}\.\d{1,2}/
         And stdout should contain /compiled at/
         And stdout should contain /^\[info\] loaded plugin: viaroute/
         And stdout should contain /^\[info\] trial run/
         And stdout should contain /^\[info\] shutdown completed/
-        And it should exit with code 0
+        And it should exit successfully

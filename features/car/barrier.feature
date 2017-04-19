@@ -10,6 +10,7 @@ Feature: Car - Barriers
             |                | x     |
             | bollard        |       |
             | gate           | x     |
+            | lift_gate      | x     |
             | cattle_grid    | x     |
             | border_control | x     |
             | toll_booth     | x     |
@@ -18,6 +19,7 @@ Feature: Car - Barriers
             | wall           |       |
             | fence          |       |
             | some_tag       |       |
+            | block          |       |
 
     Scenario: Car - Access tag trumphs barriers
         Then routability should be
@@ -27,12 +29,19 @@ Feature: Car - Barriers
             | gate         | permissive    | x     |
             | gate         | designated    | x     |
             | gate         | no            |       |
-            | gate         | private       |       |
+            | gate         | private       | x     |
             | gate         | agricultural  |       |
             | wall         |               |       |
             | wall         | yes           | x     |
             | wall         | permissive    | x     |
             | wall         | designated    | x     |
             | wall         | no            |       |
-            | wall         | private       |       |
+            | wall         | private       | x     |
             | wall         | agricultural  |       |
+
+    Scenario: Car - Rising bollard exception for barriers
+        Then routability should be
+            | node/barrier | node/bollard  | bothw |
+            | bollard      |               |       |
+            | bollard      | rising        | x     |
+            | bollard      | removable     |       |

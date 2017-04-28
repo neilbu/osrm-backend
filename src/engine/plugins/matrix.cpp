@@ -64,9 +64,65 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
     {
         return Error("TooBig", "Too many table coordinates", result);
     }
-
+   
     auto snapped_phantoms = SnapPhantomNodes(GetPhantomNodes(facade, params));
-    std::vector<EdgeWeight> result_table(num_coordinates);
+
+    const bool continue_straight_at_waypoint = facade.GetContinueStraightDefault();
+
+    std::vector<std::pair<EdgeWeight, double>> result_table(num_coordinates);
+    
+    for (unsigned sourceIndex = 0; sourceIndex < num_coordinates; ++sourceIndex)
+    {
+        const auto sourceNode = snapped_phantoms[sourceIndex];
+	for (unsigned targetIndex = 0; targetIndex < num_coordinates; ++targetIndex) 
+	{
+	    if (sourceIndex == targetIndex) 
+	    {
+		result_table.emplace_back(std::make_pair(0, 0));
+	    }
+	    else
+	    {
+		const auto targetNode = snapped_phantoms[sourceIndex];
+		std::vector<PhantomNodes> start_end_nodes;
+		start_end_nodes.push_back(PhantomNodes{sourceNode, targetNode});
+		auto &last_inserted = start_end_nodes.back();
+		// enable forward direction if possible
+		if (last_inserted.source_phantom.forward_segment_id.id != SPECIAL_SEGMENTID)
+		{
+		    last_inserted.source_phantom.forward_segment_id.enabled |=
+			!continue_straight_at_waypoint;
+		}
+		// enable reverse direction if possible
+		if (last_inserted.source_phantom.reverse_segment_id.id != SPECIAL_SEGMENTID)
+		{
+		    last_inserted.source_phantom.reverse_segment_id.enabled |=
+			!continue_straight_at_waypoint;
+		}
+		InternalRouteResult raw_route;
+		if (1 == start_end_nodes.size() && algorithms.HasDirectShortestPathSearch())
+		{
+		    raw_route = algorithms.DirectShortestPathSearch(start_end_nodes.front());
+		}
+		else
+		{
+		    raw_route =
+			algorithms.ShortestPathSearch(start_end_nodes, continue_straight_at_waypoint);
+		}
+
+		if (raw_route.is_valid()) 
+		{
+		    // TODO: Calculate diatance from the paths - use viaroute as a guide
+		    //MakeRoute(raw_route.segment_end_coordinates,
+                    //                 raw_route.unpacked_path_segments,
+                    //                 raw_route.source_traversed_in_reverse,
+                    //                 raw_route.target_traversed_in_reverse);
+		    
+		}
+
+	    }
+	  
+	}
+    }
     
     if (result_table.empty())
     {

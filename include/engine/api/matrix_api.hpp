@@ -36,7 +36,7 @@ class MatrixAPI final : public BaseAPI
     {
     }
 
-    virtual void MakeResponse(const std::vector<EdgeWeight> &durations,
+    virtual void MakeResponse(const std::vector<std::pair<EdgeWeight, double>> &durations,
                               const std::vector<PhantomNode> &phantoms,
                               util::json::Object &response) const
     {
@@ -77,7 +77,7 @@ class MatrixAPI final : public BaseAPI
         return json_waypoints;
     }
 
-    virtual util::json::Array MakeMatrix(const std::vector<EdgeWeight> &values,
+    virtual util::json::Array MakeMatrix(const std::vector<std::pair<EdgeWeight, double>> &values,
                                         std::size_t matrix_size) const
     {
         util::json::Array json_table;
@@ -90,12 +90,19 @@ class MatrixAPI final : public BaseAPI
             std::transform(row_begin_iterator,
                            row_end_iterator,
                            json_row.values.begin(),
-                           [](const EdgeWeight duration) {
-                               if (duration == MAXIMAL_EDGE_DURATION)
+                           [](const std::pair<EdgeWeight, double> duration) {
+                               util::json::Object result = util::json::Object();
+                               if (duration.first == MAXIMAL_EDGE_DURATION)
                                {
-                                   return util::json::Value(util::json::Null());
+				    result.values["distance"] = util::json::Null();
+				    result.values["time"] = util::json::Null();			       
                                }
-                               return util::json::Value(util::json::Number(duration / 10.));
+                               else
+			       {
+				    result.values["distance"] = duration.second / 10.;
+				    result.values["time"] = duration.first;			       
+			       }
+			       return result;
                            });
             json_table.values.push_back(std::move(json_row));
         }

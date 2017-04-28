@@ -33,7 +33,7 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
                                   const api::MatrixParameters &params,
                                   util::json::Object &result) const
 {
-    BOOST_ASSERT(route_parameters.IsValid());
+    BOOST_ASSERT(params.IsValid());
 
     if (!algorithms.HasDirectShortestPathSearch() && !algorithms.HasShortestPathSearch())
     {

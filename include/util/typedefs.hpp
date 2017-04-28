@@ -28,7 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef TYPEDEFS_H
 #define TYPEDEFS_H
 
-#include "util/strong_typedef.hpp"
+#include "util/alias.hpp"
 
 #include <boost/assert.hpp>
 
@@ -37,11 +37,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <limits>
 
 // OpenStreetMap node ids are higher than 2^32
-OSRM_STRONG_TYPEDEF(std::uint64_t, OSMNodeID)
-OSRM_STRONG_TYPEDEF_HASHABLE(std::uint64_t, OSMNodeID)
-
-OSRM_STRONG_TYPEDEF(std::uint32_t, OSMWayID)
-OSRM_STRONG_TYPEDEF_HASHABLE(std::uint32_t, OSMWayID)
+namespace tag
+{
+struct osm_node_id
+{
+};
+struct osm_way_id
+{
+};
+}
+using OSMNodeID = osrm::Alias<std::uint64_t, tag::osm_node_id>;
+static_assert(std::is_pod<OSMNodeID>(), "OSMNodeID is not a valid alias");
+using OSMWayID = osrm::Alias<std::uint64_t, tag::osm_way_id>;
+static_assert(std::is_pod<OSMWayID>(), "OSMWayID is not a valid alias");
 
 static const OSMNodeID SPECIAL_OSM_NODEID = OSMNodeID{std::numeric_limits<std::uint64_t>::max()};
 static const OSMWayID SPECIAL_OSM_WAYID = OSMWayID{std::numeric_limits<std::uint32_t>::max()};
@@ -58,6 +66,9 @@ using NodeID = std::uint32_t;
 using EdgeID = std::uint32_t;
 using NameID = std::uint32_t;
 using EdgeWeight = std::int32_t;
+using EdgeDuration = std::int32_t;
+using SegmentWeight = std::uint32_t;
+using SegmentDuration = std::uint32_t;
 using TurnPenalty = std::int16_t; // turn penalty in 100ms units
 
 static const std::size_t INVALID_INDEX = std::numeric_limits<std::size_t>::max();
@@ -85,8 +96,10 @@ static const EdgeID SPECIAL_EDGEID = std::numeric_limits<EdgeID>::max();
 static const NameID INVALID_NAMEID = std::numeric_limits<NameID>::max();
 static const NameID EMPTY_NAMEID = 0;
 static const unsigned INVALID_COMPONENTID = 0;
+static const SegmentWeight INVALID_SEGMENT_WEIGHT = (1u << 20) - 1;
+static const SegmentDuration INVALID_SEGMENT_DURATION = (1u << 20) - 1;
 static const EdgeWeight INVALID_EDGE_WEIGHT = std::numeric_limits<EdgeWeight>::max();
-static const EdgeWeight MAXIMAL_EDGE_DURATION = std::numeric_limits<EdgeWeight>::max();
+static const EdgeDuration MAXIMAL_EDGE_DURATION = std::numeric_limits<EdgeDuration>::max();
 static const TurnPenalty INVALID_TURN_PENALTY = std::numeric_limits<TurnPenalty>::max();
 
 // FIXME the bitfields we use require a reduced maximal duration, this should be kept consistent

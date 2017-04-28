@@ -13,6 +13,7 @@
 #include "osrm/route_parameters.hpp"
 #include "osrm/status.hpp"
 #include "osrm/storage_config.hpp"
+#include "osrm/matrix_parameters.hpp"
 #include "osrm/table_parameters.hpp"
 #include "osrm/tile_parameters.hpp"
 #include "osrm/trip_parameters.hpp"
@@ -40,6 +41,7 @@ using tile_parameters_ptr = std::unique_ptr<osrm::TileParameters>;
 using match_parameters_ptr = std::unique_ptr<osrm::MatchParameters>;
 using nearest_parameters_ptr = std::unique_ptr<osrm::NearestParameters>;
 using table_parameters_ptr = std::unique_ptr<osrm::TableParameters>;
+using matrix_parameters_ptr = std::unique_ptr<osrm::MatrixParameters>;
 
 template <typename ResultT> inline v8::Local<v8::Value> render(const ResultT &result);
 
@@ -866,6 +868,22 @@ argumentsToTableParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
             }
         }
     }
+
+    return params;
+}
+
+inline matrix_parameters_ptr
+argumentsToMatrixParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
+                          bool requires_multiple_coordinates)
+{
+    matrix_parameters_ptr params = std::make_unique<osrm::MatrixParameters>();
+    bool has_base_params = argumentsToParameter(args, params, requires_multiple_coordinates);
+    if (!has_base_params)
+        return matrix_parameters_ptr();
+
+    v8::Local<v8::Object> obj = Nan::To<v8::Object>(args[0]).ToLocalChecked();
+    if (obj.IsEmpty())
+        return matrix_parameters_ptr();
 
     return params;
 }

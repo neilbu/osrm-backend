@@ -40,6 +40,7 @@ namespace json = util::json;
 using engine::EngineConfig;
 using engine::api::RouteParameters;
 using engine::api::TableParameters;
+using engine::api::MatrixParameters;
 using engine::api::NearestParameters;
 using engine::api::TripParameters;
 using engine::api::MatchParameters;
@@ -93,6 +94,15 @@ class OSRM final
      * \see Status, TableParameters and json::Object
      */
     Status Table(const TableParameters &parameters, json::Object &result) const;
+
+    /**
+     * Distance matrix (actual distances instead of times) for coordinates.
+     *
+     * \param parameters matrix query specific parameters
+     * \return Status indicating success for the query or failure
+     * \see Status, MatrixParameters and json::Object
+     */
+    Status Matrix(const MatrixParameters &parameters, json::Object &result) const;
 
     /**
      * Nearest street segment for coordinate.

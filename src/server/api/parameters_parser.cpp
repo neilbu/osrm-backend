@@ -4,6 +4,7 @@
 #include "server/api/nearest_parameter_grammar.hpp"
 #include "server/api/route_parameters_grammar.hpp"
 #include "server/api/table_parameter_grammar.hpp"
+#include "server/api/matrix_parameter_grammar.hpp"
 #include "server/api/tile_parameter_grammar.hpp"
 #include "server/api/trip_parameter_grammar.hpp"
 
@@ -23,6 +24,7 @@ using is_grammar_t =
     std::integral_constant<bool,
                            std::is_same<RouteParametersGrammar<>, T>::value ||
                                std::is_same<TableParametersGrammar<>, T>::value ||
+                               std::is_same<MatrixParametersGrammar<>, T>::value ||
                                std::is_same<NearestParametersGrammar<>, T>::value ||
                                std::is_same<TripParametersGrammar<>, T>::value ||
                                std::is_same<MatchParametersGrammar<>, T>::value ||
@@ -78,6 +80,14 @@ boost::optional<engine::api::TableParameters> parseParameters(std::string::itera
                                                               const std::string::iterator end)
 {
     return detail::parseParameters<engine::api::TableParameters, TableParametersGrammar<>>(iter,
+                                                                                           end);
+}
+
+template <>
+boost::optional<engine::api::MatrixParameters> parseParameters(std::string::iterator &iter,
+                                                              const std::string::iterator end)
+{
+    return detail::parseParameters<engine::api::MatrixParameters, MatrixParametersGrammar<>>(iter,
                                                                                            end);
 }
 

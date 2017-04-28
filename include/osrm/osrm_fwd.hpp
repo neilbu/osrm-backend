@@ -48,6 +48,7 @@ namespace api
 {
 struct RouteParameters;
 struct TableParameters;
+struct MatrixParameters;
 struct NearestParameters;
 struct TripParameters;
 struct MatchParameters;

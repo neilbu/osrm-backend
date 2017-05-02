@@ -59,21 +59,12 @@ class MatrixAPI final : public BaseAPI
         boost::range::transform(
             phantoms,
             std::back_inserter(json_waypoints.values),
-            [this](const PhantomNode &phantom) { return BaseAPI::MakeWaypoint(phantom); });
-        return json_waypoints;
-    }
-
-    virtual util::json::Array MakeWaypoints(const std::vector<PhantomNode> &phantoms,
-                                            const std::vector<std::size_t> &indices) const
-    {
-        util::json::Array json_waypoints;
-        json_waypoints.values.reserve(indices.size());
-        boost::range::transform(indices,
-                                std::back_inserter(json_waypoints.values),
-                                [this, phantoms](const std::size_t idx) {
-                                    BOOST_ASSERT(idx < phantoms.size());
-                                    return BaseAPI::MakeWaypoint(phantoms[idx]);
-                                });
+            [this](const PhantomNode &phantom) { 
+		util::json::Array array;
+		array.values.push_back(static_cast<double>(util::toFloating(phantom.location.lon)));
+		array.values.push_back(static_cast<double>(util::toFloating(phantom.location.lat)));
+		return array;
+	    });
         return json_waypoints;
     }
 

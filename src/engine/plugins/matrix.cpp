@@ -69,7 +69,7 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
 
     const bool continue_straight_at_waypoint = facade.GetContinueStraightDefault();
 
-    std::vector<std::pair<EdgeWeight, double>> result_table(num_coordinates);
+    std::vector<std::pair<EdgeWeight, double>> result_table;
     
     for (unsigned sourceIndex = 0; sourceIndex < num_coordinates; ++sourceIndex)
     {
@@ -82,7 +82,7 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
 	    }
 	    else
 	    {
-		const auto targetNode = snapped_phantoms[sourceIndex];
+		const auto targetNode = snapped_phantoms[targetIndex];
 		std::vector<PhantomNodes> start_end_nodes;
 		start_end_nodes.push_back(PhantomNodes{sourceNode, targetNode});
 		auto &last_inserted = start_end_nodes.back();
@@ -111,12 +111,48 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
 
 		if (raw_route.is_valid()) 
 		{
-		    // TODO: Calculate diatance from the paths - use viaroute as a guide
-		    //MakeRoute(raw_route.segment_end_coordinates,
-                    //                 raw_route.unpacked_path_segments,
-                    //                 raw_route.source_traversed_in_reverse,
-                    //                 raw_route.target_traversed_in_reverse);
+		    // Calculate distance and time from the legs
+		    std::vector<guidance::RouteLeg> legs;
+		    std::vector<guidance::LegGeometry> leg_geometries;
+		    auto number_of_legs = raw_route.segment_end_coordinates.size();
 		    
+		    double route_distance = 0.0;
+		    double route_duration = 0.0;
+
+		    for (auto idx : util::irange<std::size_t>(0UL, number_of_legs))
+		    {
+			const auto &phantoms = raw_route.segment_end_coordinates[idx];
+			const auto &path_data = raw_route.unpacked_path_segments[idx];
+
+			const bool reversed_source = raw_route.source_traversed_in_reverse[idx];
+			const bool reversed_target = raw_route.target_traversed_in_reverse[idx];
+
+			auto leg_geometry = guidance::assembleGeometry(facade,
+								    path_data,
+								    phantoms.source_phantom,
+								    phantoms.target_phantom,
+								    reversed_source,
+								    reversed_target);
+			auto leg = guidance::assembleLeg(facade,
+							path_data,
+							leg_geometry,
+							phantoms.source_phantom,
+							phantoms.target_phantom,
+							reversed_target,
+							false);
+			
+
+			route_distance += leg.distance;
+			route_duration += leg.duration;
+		    }
+
+		    result_table.emplace_back(std::make_pair(route_distance, route_duration));
+		    
+		}
+		else
+		{
+		    // We don't have a route, so cannot provide an answer
+		    result_table.emplace_back(std::make_pair(-1, -1));
 		}
 
 	    }

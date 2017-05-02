@@ -99,8 +99,8 @@ class MatrixAPI final : public BaseAPI
                                }
                                else
 			       {
-				    result.values["distance"] = duration.second / 10.;
-				    result.values["time"] = duration.first;			       
+				    result.values["distance"] = duration.first;
+				    result.values["time"] = duration.second;			       
 			       }
 			       return result;
                            });

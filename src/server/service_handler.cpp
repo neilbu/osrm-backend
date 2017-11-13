@@ -5,6 +5,7 @@
 #include "server/service/route_service.hpp"
 #include "server/service/table_service.hpp"
 #include "server/service/matrix_service.hpp"
+#include "server/service/journey_service.hpp"
 #include "server/service/tile_service.hpp"
 #include "server/service/trip_service.hpp"
 
@@ -22,6 +23,7 @@ ServiceHandler::ServiceHandler(osrm::EngineConfig &config) : routing_machine(con
     service_map["route"] = std::make_unique<service::RouteService>(routing_machine);
     service_map["table"] = std::make_unique<service::TableService>(routing_machine);
     service_map["matrix"] = std::make_unique<service::MatrixService>(routing_machine);
+    service_map["journey"] = std::make_unique<service::JourneyService>(routing_machine);
     service_map["nearest"] = std::make_unique<service::NearestService>(routing_machine);
     service_map["trip"] = std::make_unique<service::TripService>(routing_machine);
     service_map["match"] = std::make_unique<service::MatchService>(routing_machine);

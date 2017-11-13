@@ -41,6 +41,7 @@ using engine::EngineConfig;
 using engine::api::RouteParameters;
 using engine::api::TableParameters;
 using engine::api::MatrixParameters;
+using engine::api::JourneyParameters;
 using engine::api::NearestParameters;
 using engine::api::TripParameters;
 using engine::api::MatchParameters;
@@ -103,6 +104,15 @@ class OSRM final
      * \see Status, MatrixParameters and json::Object
      */
     Status Matrix(const MatrixParameters &parameters, json::Object &result) const;
+
+    /**
+     * Journey distances calculated for coordinate pairs.
+     *
+     * \param parameters matrix query specific parameters
+     * \return Status indicating success for the query or failure
+     * \see Status, JourneyParameters and json::Object
+     */
+    Status Journey(const JourneyParameters &parameters, json::Object &result) const;
 
     /**
      * Nearest street segment for coordinate.

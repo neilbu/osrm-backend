@@ -6,6 +6,7 @@
 #include "engine/api/route_parameters.hpp"
 #include "engine/api/table_parameters.hpp"
 #include "engine/api/matrix_parameters.hpp"
+#include "engine/api/journey_parameters.hpp"
 #include "engine/api/tile_parameters.hpp"
 #include "engine/api/trip_parameters.hpp"
 #include "engine/data_watchdog.hpp"
@@ -17,6 +18,7 @@
 #include "engine/plugins/nearest.hpp"
 #include "engine/plugins/table.hpp"
 #include "engine/plugins/matrix.hpp"
+#include "engine/plugins/journey.hpp"
 #include "engine/plugins/tile.hpp"
 #include "engine/plugins/trip.hpp"
 #include "engine/plugins/viaroute.hpp"
@@ -45,6 +47,8 @@ class EngineInterface
                          util::json::Object &result) const = 0;
     virtual Status Matrix(const api::MatrixParameters &parameters,
                          util::json::Object &result) const = 0;
+    virtual Status Journey(const api::JourneyParameters &parameters,
+                         util::json::Object &result) const = 0;
     virtual Status Nearest(const api::NearestParameters &parameters,
                            util::json::Object &result) const = 0;
     virtual Status Trip(const api::TripParameters &parameters,
@@ -61,6 +65,7 @@ template <typename Algorithm> class Engine final : public EngineInterface
         : route_plugin(config.max_locations_viaroute),       //
           table_plugin(config.max_locations_distance_table), //
           matrix_plugin(config.max_locations_distance_table), //
+          journey_plugin(config.max_locations_distance_table), //
           nearest_plugin(config.max_results_nearest),        //
           trip_plugin(config.max_locations_trip),            //
           match_plugin(config.max_locations_map_matching),   //
@@ -112,6 +117,14 @@ template <typename Algorithm> class Engine final : public EngineInterface
         return matrix_plugin.HandleRequest(*facade, algorithms, params, result);
     }
 
+    Status Journey(const api::JourneyParameters &params,
+                 util::json::Object &result) const override final
+    {
+        auto facade = facade_provider->Get();
+        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
+        return journey_plugin.HandleRequest(*facade, algorithms, params, result);
+    }
+
     Status Nearest(const api::NearestParameters &params,
                    util::json::Object &result) const override final
     {
@@ -151,6 +164,7 @@ template <typename Algorithm> class Engine final : public EngineInterface
     const plugins::ViaRoutePlugin route_plugin;
     const plugins::TablePlugin table_plugin;
     const plugins::MatrixPlugin matrix_plugin;
+    const plugins::JourneyPlugin journey_plugin;
     const plugins::NearestPlugin nearest_plugin;
     const plugins::TripPlugin trip_plugin;
     const plugins::MatchPlugin match_plugin;

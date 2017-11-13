@@ -5,6 +5,7 @@
 #include "server/api/route_parameters_grammar.hpp"
 #include "server/api/table_parameter_grammar.hpp"
 #include "server/api/matrix_parameter_grammar.hpp"
+#include "server/api/journey_parameter_grammar.hpp"
 #include "server/api/tile_parameter_grammar.hpp"
 #include "server/api/trip_parameter_grammar.hpp"
 
@@ -25,6 +26,7 @@ using is_grammar_t =
                            std::is_same<RouteParametersGrammar<>, T>::value ||
                                std::is_same<TableParametersGrammar<>, T>::value ||
                                std::is_same<MatrixParametersGrammar<>, T>::value ||
+                               std::is_same<JourneyParametersGrammar<>, T>::value ||
                                std::is_same<NearestParametersGrammar<>, T>::value ||
                                std::is_same<TripParametersGrammar<>, T>::value ||
                                std::is_same<MatchParametersGrammar<>, T>::value ||
@@ -88,6 +90,14 @@ boost::optional<engine::api::MatrixParameters> parseParameters(std::string::iter
                                                               const std::string::iterator end)
 {
     return detail::parseParameters<engine::api::MatrixParameters, MatrixParametersGrammar<>>(iter,
+                                                                                           end);
+}
+
+template <>
+boost::optional<engine::api::JourneyParameters> parseParameters(std::string::iterator &iter,
+                                                              const std::string::iterator end)
+{
+    return detail::parseParameters<engine::api::JourneyParameters, JourneyParametersGrammar<>>(iter,
                                                                                            end);
 }
 

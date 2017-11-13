@@ -25,40 +25,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#ifndef OSRM_FWD_HPP
-#define OSRM_FWD_HPP
+#ifndef GLOBAL_JOURNEY_PARAMETERS_HPP
+#define GLOBAL_JOURNEY_PARAMETERS_HPP
 
-// OSRM API forward declarations for usage in interfaces. Exposes forward declarations for:
-// osrm::util::json::Object, osrm::engine::api::XParameters
+#include "engine/api/journey_parameters.hpp"
 
 namespace osrm
 {
-
-namespace util
-{
-namespace json
-{
-struct Object;
-} // ns json
-} // ns util
-
-namespace engine
-{
-namespace api
-{
-struct RouteParameters;
-struct TableParameters;
-struct MatrixParameters;
-struct JourneyParameters;
-struct NearestParameters;
-struct TripParameters;
-struct MatchParameters;
-struct TileParameters;
-} // ns api
-
-class EngineInterface;
-struct EngineConfig;
-} // ns engine
-} // ns osrm
+using engine::api::JourneyParameters;
+}
 
 #endif

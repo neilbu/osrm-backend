@@ -5,6 +5,7 @@
 #include "engine/api/route_parameters.hpp"
 #include "engine/api/table_parameters.hpp"
 #include "engine/api/matrix_parameters.hpp"
+#include "engine/api/journey_parameters.hpp"
 #include "engine/api/trip_parameters.hpp"
 #include "engine/engine.hpp"
 #include "engine/engine_config.hpp"
@@ -76,6 +77,11 @@ engine::Status OSRM::Table(const engine::api::TableParameters &params, json::Obj
 engine::Status OSRM::Matrix(const engine::api::MatrixParameters &params, json::Object &result) const
 {
     return engine_->Matrix(params, result);
+}
+
+engine::Status OSRM::Journey(const engine::api::JourneyParameters &params, json::Object &result) const
+{
+    return engine_->Journey(params, result);
 }
 
 engine::Status OSRM::Nearest(const engine::api::NearestParameters &params,

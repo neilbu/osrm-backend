@@ -14,6 +14,7 @@
 #include "osrm/status.hpp"
 #include "osrm/storage_config.hpp"
 #include "osrm/matrix_parameters.hpp"
+#include "osrm/journey_parameters.hpp"
 #include "osrm/table_parameters.hpp"
 #include "osrm/tile_parameters.hpp"
 #include "osrm/trip_parameters.hpp"
@@ -42,6 +43,7 @@ using match_parameters_ptr = std::unique_ptr<osrm::MatchParameters>;
 using nearest_parameters_ptr = std::unique_ptr<osrm::NearestParameters>;
 using table_parameters_ptr = std::unique_ptr<osrm::TableParameters>;
 using matrix_parameters_ptr = std::unique_ptr<osrm::MatrixParameters>;
+using journey_parameters_ptr = std::unique_ptr<osrm::JourneyParameters>;
 
 template <typename ResultT> inline v8::Local<v8::Value> render(const ResultT &result);
 
@@ -884,6 +886,22 @@ argumentsToMatrixParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
     v8::Local<v8::Object> obj = Nan::To<v8::Object>(args[0]).ToLocalChecked();
     if (obj.IsEmpty())
         return matrix_parameters_ptr();
+
+    return params;
+}
+
+inline journey_parameters_ptr
+argumentsToJourneyParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
+                          bool requires_multiple_coordinates)
+{
+    journey_parameters_ptr params = std::make_unique<osrm::JourneyParameters>();
+    bool has_base_params = argumentsToParameter(args, params, requires_multiple_coordinates);
+    if (!has_base_params)
+        return journey_parameters_ptr();
+
+    v8::Local<v8::Object> obj = Nan::To<v8::Object>(args[0]).ToLocalChecked();
+    if (obj.IsEmpty())
+        return journey_parameters_ptr();
 
     return params;
 }

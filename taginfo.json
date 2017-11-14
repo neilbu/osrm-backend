@@ -144,29 +144,38 @@
         {"key": "maxspeed", "value": "rural"},
         {"key": "maxspeed", "value": "trunk"},
         {"key": "maxspeed", "value": "motorway"},
-        {"key": "maxspeed", "value": "ch:rural"},
-        {"key": "maxspeed", "value": "ch:trunk"},
-        {"key": "maxspeed", "value": "ch:motorway"},
-        {"key": "maxspeed", "value": "de:living_street"},
-        {"key": "maxspeed", "value": "ru:living_street"},
-        {"key": "maxspeed", "value": "ru:urban"},
-        {"key": "maxspeed", "value": "ua:urban"},
-        {"key": "maxspeed", "value": "at:rural"},
-        {"key": "maxspeed", "value": "de:rural"},
-        {"key": "maxspeed", "value": "at:trunk"},
-        {"key": "maxspeed", "value": "cz:trunk"},
-        {"key": "maxspeed", "value": "ro:trunk"},
-        {"key": "maxspeed", "value": "cz:motorway"},
-        {"key": "maxspeed", "value": "de:motorway"},
-        {"key": "maxspeed", "value": "ru:motorway"},
-        {"key": "maxspeed", "value": "gb:nsl_single"},
-        {"key": "maxspeed", "value": "gb:nsl_dual"},
-        {"key": "maxspeed", "value": "gb:motorway"},
-        {"key": "maxspeed", "value": "uk:nsl_single"},
-        {"key": "maxspeed", "value": "uk:nsl_dual"},
-        {"key": "maxspeed", "value": "uk:motorway"},
-        {"key": "maxspeed", "value": "nl:rural"},
-        {"key": "maxspeed", "value": "nl:trunk"},
+        {"key": "maxspeed", "value": "AT:rural"},
+        {"key": "maxspeed", "value": "AT:trunk"},
+        {"key": "maxspeed", "value": "BE:motorway"},
+        {"key": "maxspeed", "value": "CH:rural"},
+        {"key": "maxspeed", "value": "CH:trunk"},
+        {"key": "maxspeed", "value": "CH:motorway"},
+        {"key": "maxspeed", "value": "CZ:trunk"},
+        {"key": "maxspeed", "value": "CZ:motorway"},
+        {"key": "maxspeed", "value": "DE:living_street"},
+        {"key": "maxspeed", "value": "DE:rural"},
+        {"key": "maxspeed", "value": "DE:motorway"},
+        {"key": "maxspeed", "value": "DK:rural"},
+        {"key": "maxspeed", "value": "GB:nsl_single"},
+        {"key": "maxspeed", "value": "GB:nsl_dual"},
+        {"key": "maxspeed", "value": "GB:motorway"},
+        {"key": "maxspeed", "value": "NL:rural"},
+        {"key": "maxspeed", "value": "NL:trunk"},
+        {"key": "maxspeed", "value": "NO:rural"},
+        {"key": "maxspeed", "value": "NO:motorway"},
+        {"key": "maxspeed", "value": "PL:rural"},
+        {"key": "maxspeed", "value": "PL:trunk"},
+        {"key": "maxspeed", "value": "PL:motorway"},
+        {"key": "maxspeed", "value": "RO:trunk"},
+        {"key": "maxspeed", "value": "RU:living_street"},
+        {"key": "maxspeed", "value": "RU:urban"},
+        {"key": "maxspeed", "value": "RU:motorway"},
+        {"key": "maxspeed", "value": "UA:urban"},
+        {"key": "maxspeed", "value": "UK:nsl_single"},
+        {"key": "maxspeed", "value": "UK:nsl_dual"},
+        {"key": "maxspeed", "value": "UK:motorway"},
+        {"key": "maxspeed", "value": "ZA:urban"},
+        {"key": "maxspeed", "value": "ZA:rural"},
         {"key": "smoothness", "value": "intermediate"},
         {"key": "smoothness", "value": "bad"},
         {"key": "smoothness", "value": "very_bad"},
@@ -266,6 +275,11 @@
             "description": "Name of road for navigation instructions."
         },
         {
+            "key": "driving_side",
+            "object_types": [ "way" ],
+            "description": "Driving side in all bidirectional traffic."
+        },
+        {
             "key": "turn:lanes",
             "object_types": [ "way" ],
             "description": "Turn Lanes for lane guidance."
@@ -351,6 +365,11 @@
             "description": "Destination and direction of road for oneways for navigation instructions, supplements name."
         },
         {
+            "key": "junction:ref",
+            "object_types": [ "way" ],
+            "description": "Exit number or exit name of road for navigation instructions. Not to be confused with destination."
+        },
+        {
             "key": "junction",
             "object_types": [ "way" ],
             "value": "roundabout"
@@ -360,6 +379,16 @@
             "object_types": [ "way" ],
             "value": "circular",
             "description": "A Roundabout where the traffic on the roundabout not always has right of way."
+        },
+        {
+            "key": "proposed",
+            "object_types": [ "way" ],
+            "description": "Proposed ways. Discarded for routing"
+        },
+        {
+            "key": "construction",
+            "object_types": [ "way" ],
+            "description": "Ways under construction. Discarded for routing except construction=no, construction=widening"
         },
         {
             "key": "type",

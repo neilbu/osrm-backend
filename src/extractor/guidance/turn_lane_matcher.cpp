@@ -86,8 +86,7 @@ bool isValidMatch(const TurnLaneType::Mask tag, const TurnInstruction instructio
                (instruction.type ==
                     TurnType::Continue && // Forks can be experienced, even for straight segments
                 (instruction.direction_modifier == DirectionModifier::SlightLeft ||
-                 instruction.direction_modifier == DirectionModifier::SlightRight)) ||
-               instruction.type == TurnType::UseLane;
+                 instruction.direction_modifier == DirectionModifier::SlightRight));
     }
     else if (tag == TurnLaneType::slight_left || tag == TurnLaneType::left ||
              tag == TurnLaneType::sharp_left)
@@ -209,16 +208,7 @@ Intersection triviallyMatchLanesToTurns(Intersection intersection,
         util::guidance::LaneTupleIdPair key{{LaneID(data.to - data.from + 1), data.from},
                                             lane_string_id};
 
-        auto lane_data_id = boost::numeric_cast<LaneDataID>(lane_data_to_id.size());
-        const auto it = lane_data_to_id.find(key);
-
-        if (it == lane_data_to_id.end())
-            lane_data_to_id.insert({key, lane_data_id});
-        else
-            lane_data_id = it->second;
-
-        // set lane id instead after the switch:
-        road.lane_data_id = lane_data_id;
+        road.lane_data_id = lane_data_to_id.ConcurrentFindOrAdd(key);
     };
 
     if (!lane_data.empty() && lane_data.front().tag == TurnLaneType::uturn)
@@ -239,7 +229,7 @@ Intersection triviallyMatchLanesToTurns(Intersection intersection,
                 road_index = 2;
             }
             intersection[u_turn].entry_allowed = true;
-            intersection[u_turn].instruction.type = TurnType::Turn;
+            intersection[u_turn].instruction.type = TurnType::Continue;
             intersection[u_turn].instruction.direction_modifier = DirectionModifier::UTurn;
 
             matchRoad(intersection[u_turn], lane_data.back());
@@ -258,10 +248,6 @@ Intersection triviallyMatchLanesToTurns(Intersection intersection,
             BOOST_ASSERT(isValidMatch(lane_data[lane].tag, intersection[road_index].instruction));
             BOOST_ASSERT(findBestMatch(lane_data[lane].tag, intersection) ==
                          intersection.begin() + road_index);
-
-            if (TurnType::Suppressed == intersection[road_index].instruction.type &&
-                !lane_data[lane].suppress_assignment)
-                intersection[road_index].instruction.type = TurnType::UseLane;
 
             matchRoad(intersection[road_index], lane_data[lane]);
             ++lane;
@@ -283,7 +269,7 @@ Intersection triviallyMatchLanesToTurns(Intersection intersection,
             u_turn = intersection.size() - 1;
         }
         intersection[u_turn].entry_allowed = true;
-        intersection[u_turn].instruction.type = TurnType::Turn;
+        intersection[u_turn].instruction.type = TurnType::Continue;
         intersection[u_turn].instruction.direction_modifier = DirectionModifier::UTurn;
 
         matchRoad(intersection[u_turn], lane_data.back());

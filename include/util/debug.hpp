@@ -3,6 +3,7 @@
 
 #include "extractor/guidance/intersection.hpp"
 #include "extractor/guidance/turn_lane_data.hpp"
+#include "extractor/node_data_container.hpp"
 #include "extractor/query_node.hpp"
 #include "engine/guidance/route_step.hpp"
 #include "util/node_based_graph.hpp"
@@ -21,6 +22,7 @@ namespace util
 
 namespace guidance
 {
+
 inline void print(const engine::guidance::RouteStep &step)
 {
     std::cout << static_cast<int>(step.maneuver.instruction.type) << " "
@@ -46,7 +48,8 @@ inline void print(const engine::guidance::RouteStep &step)
         std::cout << ")";
     }
     std::cout << "] name[" << step.name_id << "]: " << step.name << " Ref: " << step.ref
-              << " Pronunciation: " << step.pronunciation << "Destination: " << step.destinations;
+              << " Pronunciation: " << step.pronunciation << "Destination: " << step.destinations
+              << "Exits: " << step.exits;
 }
 
 inline void print(const std::vector<engine::guidance::RouteStep> &steps)
@@ -76,7 +79,8 @@ inline void print(const NodeBasedDynamicGraph &node_based_graph,
     for (const auto &road : intersection)
     {
         std::cout << "\t" << toString(road) << "\n";
-        std::cout << "\t\t" << node_based_graph.GetEdgeData(road.eid).road_classification.ToString()
+        std::cout << "\t\t"
+                  << node_based_graph.GetEdgeData(road.eid).flags.road_classification.ToString()
                   << "\n";
     }
     std::cout << std::flush;
@@ -89,9 +93,7 @@ inline void print(const extractor::guidance::lanes::LaneDataVector &turn_lane_da
         std::cout << "\t" << entry.tag << "("
                   << extractor::guidance::TurnLaneType::toString(entry.tag)
                   << ") from: " << static_cast<int>(entry.from)
-                  << " to: " << static_cast<int>(entry.to)
-                  << " Can Be Suppresssed: " << (entry.suppress_assignment ? "true" : "false")
-                  << "\n";
+                  << " to: " << static_cast<int>(entry.to) << "\n";
     std::cout << std::flush;
 }
 

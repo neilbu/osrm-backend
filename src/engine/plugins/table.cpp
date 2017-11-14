@@ -28,8 +28,7 @@ TablePlugin::TablePlugin(const int max_locations_distance_table)
 {
 }
 
-Status TablePlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                                  const RoutingAlgorithmsInterface &algorithms,
+Status TablePlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                                   const api::TableParameters &params,
                                   util::json::Object &result) const
 {
@@ -67,7 +66,21 @@ Status TablePlugin::HandleRequest(const datafacade::ContiguousInternalMemoryData
         return Error("TooBig", "Too many table coordinates", result);
     }
 
-    auto snapped_phantoms = SnapPhantomNodes(GetPhantomNodes(facade, params));
+    if (!CheckAlgorithms(params, algorithms, result))
+        return Status::Error;
+
+    const auto &facade = algorithms.GetFacade();
+    auto phantom_nodes = GetPhantomNodes(facade, params);
+
+    if (phantom_nodes.size() != params.coordinates.size())
+    {
+        return Error("NoSegment",
+                     std::string("Could not find a matching segment for coordinate ") +
+                         std::to_string(phantom_nodes.size()),
+                     result);
+    }
+
+    auto snapped_phantoms = SnapPhantomNodes(phantom_nodes);
     auto result_table =
         algorithms.ManyToManySearch(snapped_phantoms, params.sources, params.destinations);
 

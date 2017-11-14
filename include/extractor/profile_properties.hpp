@@ -1,11 +1,16 @@
 #ifndef PROFILE_PROPERTIES_HPP
 #define PROFILE_PROPERTIES_HPP
 
+#include "extractor/class_data.hpp"
+
 #include "util/typedefs.hpp"
 
-#include <algorithm>
 #include <boost/assert.hpp>
 #include <boost/numeric/conversion/cast.hpp>
+#include <boost/optional.hpp>
+
+#include <algorithm>
+#include <cstdint>
 
 namespace osrm
 {
@@ -17,13 +22,15 @@ const constexpr auto DEFAULT_MAX_SPEED = 180 / 3.6; // 180kmph -> m/s
 struct ProfileProperties
 {
     static constexpr int MAX_WEIGHT_NAME_LENGTH = 255;
+    static constexpr int MAX_CLASS_NAME_LENGTH = 255;
 
     ProfileProperties()
         : traffic_signal_penalty(0), u_turn_penalty(0),
           max_speed_for_map_matching(DEFAULT_MAX_SPEED), continue_straight_at_waypoint(true),
           use_turn_restrictions(false), left_hand_driving(false), fallback_to_duration(true),
-          weight_name{"duration"}
+          weight_name{"duration"}, class_names{}, call_tagless_node_function(true)
     {
+        std::fill(excludable_classes.begin(), excludable_classes.end(), INAVLID_CLASS_DATA);
         BOOST_ASSERT(weight_name[MAX_WEIGHT_NAME_LENGTH] == '\0');
     }
 
@@ -66,6 +73,41 @@ struct ProfileProperties
         return std::string(weight_name);
     }
 
+    // Mark this combination of classes as excludable
+    void SetExcludableClasses(std::size_t index, ClassData classes)
+    {
+        excludable_classes[index] = classes;
+    }
+
+    // Check if this classes are excludable
+    boost::optional<std::size_t> ClassesAreExcludable(ClassData classes) const
+    {
+        auto iter = std::find(excludable_classes.begin(), excludable_classes.end(), classes);
+        if (iter != excludable_classes.end())
+        {
+            return std::distance(excludable_classes.begin(), iter);
+        }
+
+        return {};
+    }
+
+    void SetClassName(std::size_t index, const std::string &name)
+    {
+        char *name_ptr = class_names[index];
+        auto count = std::min<std::size_t>(name.length(), MAX_CLASS_NAME_LENGTH) + 1;
+        std::copy_n(name.c_str(), count, name_ptr);
+        // Make sure this is always zero terminated
+        BOOST_ASSERT(class_names[index][count - 1] == '\0');
+        BOOST_ASSERT(class_names[index][MAX_CLASS_NAME_LENGTH] == '\0');
+    }
+
+    std::string GetClassName(std::size_t index) const
+    {
+        BOOST_ASSERT(index <= MAX_CLASS_INDEX);
+        const auto &name_it = std::begin(class_names) + index;
+        return std::string(*name_it);
+    }
+
     double GetWeightMultiplier() const { return std::pow(10., weight_precision); }
 
     double GetMaxTurnWeight() const
@@ -82,12 +124,17 @@ struct ProfileProperties
     bool continue_straight_at_waypoint;
     //! flag used for restriction parser (e.g. used for the walk profile)
     bool use_turn_restrictions;
-    bool left_hand_driving;
+    bool left_hand_driving; // DEPRECATED: property value is local to edges from API version 2
     bool fallback_to_duration;
     //! stores the name of the weight (e.g. 'duration', 'distance', 'safety')
     char weight_name[MAX_WEIGHT_NAME_LENGTH + 1];
+    //! stores the names of each class
+    std::array<char[MAX_CLASS_NAME_LENGTH + 1], MAX_CLASS_INDEX + 1> class_names;
+    //! stores the masks of excludable class combinations
+    std::array<ClassData, MAX_EXCLUDABLE_CLASSES> excludable_classes;
     unsigned weight_precision = 1;
     bool force_split_edges = false;
+    bool call_tagless_node_function = true;
 };
 }
 }

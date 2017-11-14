@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -33,83 +33,63 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <array>
 #include <string>
 
+#include "storage/io_config.hpp"
+
 namespace osrm
 {
 namespace extractor
 {
 
-struct ExtractorConfig
+struct ExtractorConfig final : storage::IOConfig
 {
-    ExtractorConfig() noexcept : requested_num_threads(0) {}
-    void UseDefaultOutputNames()
+    ExtractorConfig() noexcept : IOConfig(
+                                     {
+                                         "",
+                                     },
+                                     {},
+                                     {".osrm",
+                                      ".osrm.restrictions",
+                                      ".osrm.names",
+                                      ".osrm.tls",
+                                      ".osrm.tld",
+                                      ".osrm.timestamp",
+                                      ".osrm.geometry",
+                                      ".osrm.nbg_nodes",
+                                      ".osrm.ebg_nodes",
+                                      ".osrm.edges",
+                                      ".osrm.ebg",
+                                      ".osrm.ramIndex",
+                                      ".osrm.fileIndex",
+                                      ".osrm.turn_duration_penalties",
+                                      ".osrm.turn_weight_penalties",
+                                      ".osrm.turn_penalties_index",
+                                      ".osrm.enw",
+                                      ".osrm.properties",
+                                      ".osrm.icd",
+                                      ".osrm.cnbg",
+                                      ".osrm.cnbg_to_ebg"}),
+                                 requested_num_threads(0),
+                                 use_locations_cache(true)
     {
-        std::string basepath = input_path.string();
+    }
 
-        auto pos = std::string::npos;
-        std::array<std::string, 5> known_extensions{
-            {".osm.bz2", ".osm.pbf", ".osm.xml", ".pbf", ".osm"}};
-        for (auto ext : known_extensions)
-        {
-            pos = basepath.find(ext);
-            if (pos != std::string::npos)
-            {
-                basepath.replace(pos, ext.size(), "");
-                break;
-            }
-        }
-
-        output_file_name = basepath + ".osrm";
-        restriction_file_name = basepath + ".osrm.restrictions";
-        names_file_name = basepath + ".osrm.names";
-        turn_lane_descriptions_file_name = basepath + ".osrm.tls";
-        turn_lane_data_file_name = basepath + ".osrm.tld";
-        timestamp_file_name = basepath + ".osrm.timestamp";
-        geometry_output_path = basepath + ".osrm.geometry";
-        node_output_path = basepath + ".osrm.nodes";
-        edge_output_path = basepath + ".osrm.edges";
-        edge_graph_output_path = basepath + ".osrm.ebg";
-        rtree_nodes_output_path = basepath + ".osrm.ramIndex";
-        rtree_leafs_output_path = basepath + ".osrm.fileIndex";
-        turn_duration_penalties_path = basepath + ".osrm.turn_duration_penalties";
-        turn_weight_penalties_path = basepath + ".osrm.turn_weight_penalties";
-        turn_penalties_index_path = basepath + ".osrm.turn_penalties_index";
-        edge_based_node_weights_output_path = basepath + ".osrm.enw";
-        profile_properties_output_path = basepath + ".osrm.properties";
-        intersection_class_data_output_path = basepath + ".osrm.icd";
-        compressed_node_based_graph_output_path = basepath + ".osrm.cnbg";
-        cnbg_ebg_graph_mapping_output_path = basepath + ".osrm.cnbg_to_ebg";
+    void UseDefaultOutputNames(const boost::filesystem::path &base)
+    {
+        IOConfig::UseDefaultOutputNames(base);
     }
 
     boost::filesystem::path input_path;
     boost::filesystem::path profile_path;
-
-    std::string output_file_name;
-    std::string restriction_file_name;
-    std::string names_file_name;
-    std::string turn_lane_data_file_name;
-    std::string turn_lane_descriptions_file_name;
-    std::string timestamp_file_name;
-    std::string geometry_output_path;
-    std::string edge_output_path;
-    std::string edge_graph_output_path;
-    std::string edge_based_node_weights_output_path;
-    std::string node_output_path;
-    std::string rtree_nodes_output_path;
-    std::string rtree_leafs_output_path;
-    std::string profile_properties_output_path;
-    std::string intersection_class_data_output_path;
-    std::string turn_weight_penalties_path;
-    std::string turn_duration_penalties_path;
-    std::string compressed_node_based_graph_output_path;
-    std::string cnbg_ebg_graph_mapping_output_path;
+    std::vector<boost::filesystem::path> location_dependent_data_paths;
 
     unsigned requested_num_threads;
     unsigned small_component_size;
 
     bool generate_edge_lookup;
-    std::string turn_penalties_index_path;
 
     bool use_metadata;
+    bool parse_conditionals;
+    bool use_locations_cache;
 };
 }
 }

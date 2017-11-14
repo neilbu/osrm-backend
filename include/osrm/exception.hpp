@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace osrm
 {
 using util::exception;
+using util::RuntimeError;
 }
 
 #endif

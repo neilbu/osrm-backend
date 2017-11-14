@@ -55,7 +55,7 @@ test('route: throws with too few or invalid args', function(assert) {
 });
 
 test('route: provides no alternatives by default, but when requested it may (not guaranteed)', function(assert) {
-    assert.plan(6);
+    assert.plan(9);
     var osrm = new OSRM(monaco_path);
     var options = {coordinates: two_test_coordinates};
 
@@ -65,6 +65,12 @@ test('route: provides no alternatives by default, but when requested it may (not
         assert.equal(route.routes.length, 1);
     });
     options.alternatives = true;
+    osrm.route(options, function(err, route) {
+        assert.ifError(err);
+        assert.ok(route.routes);
+        assert.ok(route.routes.length >= 1);
+    });
+    options.alternatives = 3;
     osrm.route(options, function(err, route) {
         assert.ifError(err);
         assert.ok(route.routes);
@@ -498,3 +504,89 @@ test('route: throws on bad radiuses', function(assert) {
     }, function(err, route) {}) },
         /Radiuses array must have the same length as coordinates array/);
 });
+
+test('route: routes Monaco with valid approaches values', function(assert) {
+    assert.plan(3);
+    var osrm = new OSRM(monaco_path);
+    var options = {
+        coordinates: two_test_coordinates,
+        approaches: [null, 'curb']
+    };
+    osrm.route(options, function(err, route) {
+        assert.ifError(err);
+    });
+    options.approaches = [null, null];
+    osrm.route(options, function(err, route) {
+        assert.ifError(err);
+    });
+    options.approaches = ['unrestricted', null];
+    osrm.route(options, function(err, route) {
+        assert.ifError(err);
+    });
+});
+
+test('route: throws on bad approaches', function(assert) {
+    assert.plan(4);
+    var osrm = new OSRM(monaco_path);
+    assert.throws(function() { osrm.route({
+        coordinates: two_test_coordinates,
+        approaches: 10
+    }, function(err, route) {}) },
+        /Approaches must be an arrays of strings/);
+    assert.throws(function() { osrm.route({
+        coordinates: two_test_coordinates,
+        approaches: ['curb']
+    }, function(err, route) {}) },
+        /Approaches array must have the same length as coordinates array/);
+    assert.throws(function() { osrm.route({
+        coordinates: two_test_coordinates,
+        approaches: ['curb', 'test']
+    }, function(err, route) {}) },
+        /'approaches' param must be one of \[curb, unrestricted\]/);
+    assert.throws(function() { osrm.route({
+        coordinates: two_test_coordinates,
+        approaches: [10, 15]
+    }, function(err, route) {}) },
+        /Approach must be a string: \[curb, unrestricted\] or null/);
+});
+
+test('route: routes Monaco with custom limits on MLD', function(assert) {
+    assert.plan(2);
+    var osrm = new OSRM({
+        path: monaco_mld_path,
+        algorithm: 'MLD',
+        max_alternatives: 10,
+    });
+    osrm.route({coordinates: two_test_coordinates, alternatives: 10}, function(err, route) {
+        assert.ifError(err);
+        assert.ok(Array.isArray(route.routes));
+    });
+});
+
+test('route:  in Monaco with custom limits on MLD', function(assert) {
+    assert.plan(1);
+    var osrm = new OSRM({
+        path: monaco_mld_path,
+        algorithm: 'MLD',
+        max_alternatives: 10,
+    });
+    osrm.route({coordinates: two_test_coordinates, alternatives: 11}, function(err, route) {
+        console.log(err)
+        assert.equal(err.message, 'TooBig');
+    });
+});
+
+test('route: route in Monaco without motorways', function(assert) {
+    assert.plan(3);
+    var osrm = new OSRM({path: monaco_mld_path, algorithm: 'MLD'});
+    var options = {
+        coordinates: two_test_coordinates,
+        exclude: ['motorway']
+    };
+    osrm.route(options, function(err, response) {
+        assert.ifError(err);
+        assert.equal(response.waypoints.length, 2);
+        assert.equal(response.routes.length, 1);
+    });
+});
+

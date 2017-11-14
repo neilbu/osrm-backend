@@ -4,25 +4,26 @@
 #define EDGE_BASED_GRAPH_FACTORY_HPP_
 
 #include "extractor/compressed_edge_container.hpp"
+#include "extractor/conditional_turn_penalty.hpp"
 #include "extractor/edge_based_edge.hpp"
-#include "extractor/edge_based_node.hpp"
+#include "extractor/edge_based_node_segment.hpp"
 #include "extractor/extraction_turn.hpp"
 #include "extractor/guidance/turn_analysis.hpp"
 #include "extractor/guidance/turn_instruction.hpp"
 #include "extractor/guidance/turn_lane_types.hpp"
 #include "extractor/nbg_to_ebg.hpp"
+#include "extractor/node_data_container.hpp"
 #include "extractor/original_edge_data.hpp"
-#include "extractor/packed_osm_ids.hpp"
-#include "extractor/profile_properties.hpp"
 #include "extractor/query_node.hpp"
-#include "extractor/restriction_map.hpp"
+#include "extractor/restriction_index.hpp"
+#include "extractor/way_restriction_map.hpp"
 
+#include "util/concurrent_id_map.hpp"
 #include "util/deallocating_vector.hpp"
 #include "util/guidance/bearing_class.hpp"
 #include "util/guidance/entry_class.hpp"
 #include "util/name_table.hpp"
 #include "util/node_based_graph.hpp"
-#include "util/packed_vector.hpp"
 #include "util/typedefs.hpp"
 
 #include "storage/io.hpp"
@@ -38,8 +39,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <boost/filesystem/fstream.hpp>
-
 namespace osrm
 {
 namespace extractor
@@ -52,13 +51,13 @@ namespace lookup
 #pragma pack(push, 1)
 struct TurnIndexBlock
 {
-    OSMNodeID from_id;
-    OSMNodeID via_id;
-    OSMNodeID to_id;
+    NodeID from_id;
+    NodeID via_id;
+    NodeID to_id;
 };
 #pragma pack(pop)
 static_assert(std::is_trivial<TurnIndexBlock>::value, "TurnIndexBlock is not trivial");
-static_assert(sizeof(TurnIndexBlock) == 24, "TurnIndexBlock is not packed correctly");
+static_assert(sizeof(TurnIndexBlock) == 12, "TurnIndexBlock is not packed correctly");
 } // ns lookup
 
 struct NodeBasedGraphToEdgeBasedGraphMappingWriter; // fwd. decl
@@ -69,30 +68,30 @@ class EdgeBasedGraphFactory
     EdgeBasedGraphFactory(const EdgeBasedGraphFactory &) = delete;
     EdgeBasedGraphFactory &operator=(const EdgeBasedGraphFactory &) = delete;
 
-    explicit EdgeBasedGraphFactory(std::shared_ptr<util::NodeBasedDynamicGraph> node_based_graph,
-                                   CompressedEdgeContainer &compressed_edge_container,
+    explicit EdgeBasedGraphFactory(const util::NodeBasedDynamicGraph &node_based_graph,
+                                   EdgeBasedNodeDataContainer &node_data_container,
+                                   const CompressedEdgeContainer &compressed_edge_container,
                                    const std::unordered_set<NodeID> &barrier_nodes,
                                    const std::unordered_set<NodeID> &traffic_lights,
-                                   std::shared_ptr<const RestrictionMap> restriction_map,
                                    const std::vector<util::Coordinate> &coordinates,
-                                   const extractor::PackedOSMIDs &osm_node_ids,
-                                   ProfileProperties profile_properties,
                                    const util::NameTable &name_table,
-                                   std::vector<std::uint32_t> &turn_lane_offsets,
-                                   std::vector<guidance::TurnLaneType::Mask> &turn_lane_masks,
                                    guidance::LaneDescriptionMap &lane_description_map);
 
     void Run(ScriptingEnvironment &scripting_environment,
-             const std::string &original_edge_data_filename,
+             const std::string &turn_data_filename,
              const std::string &turn_lane_data_filename,
              const std::string &turn_weight_penalties_filename,
              const std::string &turn_duration_penalties_filename,
              const std::string &turn_penalties_index_filename,
-             const std::string &cnbg_ebg_mapping_path);
+             const std::string &cnbg_ebg_mapping_path,
+             const std::string &conditional_penalties_filename,
+             const RestrictionMap &node_restriction_map,
+             const ConditionalRestrictionMap &conditional_restriction_map,
+             const WayRestrictionMap &way_restriction_map);
 
     // The following get access functions destroy the content in the factory
     void GetEdgeBasedEdges(util::DeallocatingVector<EdgeBasedEdge> &edges);
-    void GetEdgeBasedNodes(std::vector<EdgeBasedNode> &nodes);
+    void GetEdgeBasedNodeSegments(std::vector<EdgeBasedNodeSegment> &nodes);
     void GetStartPointMarkers(std::vector<bool> &node_is_startpoint);
     void GetEdgeBasedNodeWeights(std::vector<EdgeWeight> &output_node_weights);
 
@@ -102,7 +101,7 @@ class EdgeBasedGraphFactory
     std::vector<util::guidance::BearingClass> GetBearingClasses() const;
     std::vector<util::guidance::EntryClass> GetEntryClasses() const;
 
-    unsigned GetHighestEdgeID();
+    std::uint64_t GetNumberOfEdgeBasedNodes() const;
 
     // Basic analysis of a turn (u --(e1)-- v --(e2)-- w)
     // with known angle.
@@ -118,6 +117,18 @@ class EdgeBasedGraphFactory
   private:
     using EdgeData = util::NodeBasedDynamicGraph::EdgeData;
 
+    struct Conditional
+    {
+        // the edge based nodes allow for a unique identification of conditionals
+        NodeID from_node;
+        NodeID to_node;
+        ConditionalTurnPenalty penalty;
+    };
+
+    // assign the correct index to the penalty value stored in the conditional
+    std::vector<ConditionalTurnPenalty>
+    IndexConditionals(std::vector<Conditional> &&conditionals) const;
+
     //! maps index from m_edge_based_node_list to ture/false if the node is an entry point to the
     //! graph
     std::vector<bool> m_edge_based_node_is_startpoint;
@@ -127,36 +138,51 @@ class EdgeBasedGraphFactory
     std::vector<EdgeWeight> m_edge_based_node_weights;
 
     //! list of edge based nodes (compressed segments)
-    std::vector<EdgeBasedNode> m_edge_based_node_list;
+    std::vector<EdgeBasedNodeSegment> m_edge_based_node_segments;
+    EdgeBasedNodeDataContainer &m_edge_based_node_container;
     util::DeallocatingVector<EdgeBasedEdge> m_edge_based_edge_list;
-    EdgeID m_max_edge_id;
+
+    // The number of edge-based nodes is mostly made up out of the edges in the node-based graph.
+    // Any edge in the node-based graph represents a node in the edge-based graph. In addition, we
+    // add a set of artificial edge-based nodes into the mix to model via-way turn restrictions.
+    // See https://github.com/Project-OSRM/osrm-backend/issues/2681#issuecomment-313080353 for
+    // reference
+    std::uint64_t m_number_of_edge_based_nodes;
 
     const std::vector<util::Coordinate> &m_coordinates;
-    const extractor::PackedOSMIDs &m_osm_node_ids;
-    std::shared_ptr<util::NodeBasedDynamicGraph> m_node_based_graph;
-    std::shared_ptr<RestrictionMap const> m_restriction_map;
+    const util::NodeBasedDynamicGraph &m_node_based_graph;
 
     const std::unordered_set<NodeID> &m_barrier_nodes;
     const std::unordered_set<NodeID> &m_traffic_lights;
-    CompressedEdgeContainer &m_compressed_edge_container;
-
-    ProfileProperties profile_properties;
+    const CompressedEdgeContainer &m_compressed_edge_container;
 
     const util::NameTable &name_table;
-    std::vector<std::uint32_t> &turn_lane_offsets;
-    std::vector<guidance::TurnLaneType::Mask> &turn_lane_masks;
     guidance::LaneDescriptionMap &lane_description_map;
 
-    unsigned RenumberEdges();
+    // In the edge based graph, any traversable (non reversed) edge of the node-based graph forms a
+    // node of the edge-based graph. To be able to name these nodes, we loop over the node-based
+    // graph and create a mapping from edges (node-based) to nodes (edge-based). The mapping is
+    // essentially a prefix-sum over all previous non-reversed edges of the node-based graph.
+    unsigned LabelEdgeBasedNodes();
 
-    std::vector<NBGToEBG> GenerateEdgeExpandedNodes();
+    // During the generation of the edge-expanded nodes, we need to also generate duplicates that
+    // represent state during via-way restrictions (see
+    // https://github.com/Project-OSRM/osrm-backend/issues/2681#issuecomment-313080353). Access to
+    // the information on what to duplicate and how is provided via the way_restriction_map
+    std::vector<NBGToEBG> GenerateEdgeExpandedNodes(const WayRestrictionMap &way_restriction_map);
 
+    // Edge-expanded edges are generate for all valid turns. The validity can be checked via the
+    // restriction maps
     void GenerateEdgeExpandedEdges(ScriptingEnvironment &scripting_environment,
                                    const std::string &original_edge_data_filename,
                                    const std::string &turn_lane_data_filename,
                                    const std::string &turn_weight_penalties_filename,
                                    const std::string &turn_duration_penalties_filename,
-                                   const std::string &turn_penalties_index_filename);
+                                   const std::string &turn_penalties_index_filename,
+                                   const std::string &conditional_turn_penalties_filename,
+                                   const RestrictionMap &node_restriction_map,
+                                   const ConditionalRestrictionMap &conditional_restriction_map,
+                                   const WayRestrictionMap &way_restriction_map);
 
     NBGToEBG InsertEdgeBasedNode(const NodeID u, const NodeID v);
 
@@ -164,9 +190,11 @@ class EdgeBasedGraphFactory
     std::size_t skipped_uturns_counter;
     std::size_t skipped_barrier_turns_counter;
 
-    std::unordered_map<util::guidance::BearingClass, BearingClassID> bearing_class_hash;
+    // mapping of node-based edges to edge-based nodes
+    std::vector<NodeID> nbe_to_ebn_mapping;
+    util::ConcurrentIDMap<util::guidance::BearingClass, BearingClassID> bearing_class_hash;
     std::vector<BearingClassID> bearing_class_by_node_based_node;
-    std::unordered_map<util::guidance::EntryClass, EntryClassID> entry_class_hash;
+    util::ConcurrentIDMap<util::guidance::EntryClass, EntryClassID> entry_class_hash;
 };
 } // namespace extractor
 } // namespace osrm

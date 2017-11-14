@@ -23,9 +23,12 @@ test('constructor: does not accept more than one parameter', function(assert) {
 });
 
 test('constructor: throws if necessary files do not exist', function(assert) {
-    assert.plan(1);
-    assert.throws(function() { new OSRM("missing.osrm"); },
-        /Error opening missing.osrm.names/);
+    assert.plan(2);
+    assert.throws(function() { new OSRM('missing.osrm'); },
+        /Required files are missing, cannot continue/);
+
+    assert.throws(function() { new OSRM({path: 'missing.osrm', algorithm: 'MLD'}); },
+        /Required files are missing, cannot continue/);
 });
 
 test('constructor: takes a shared memory argument', function(assert) {
@@ -80,6 +83,50 @@ test('constructor: loads CoreCH if given as algorithm', function(assert) {
     assert.plan(1);
     var osrm = new OSRM({algorithm: 'CoreCH', path: monaco_corech_path});
     assert.ok(osrm);
+});
+
+test('constructor: autoswitches to CoreCH for a CH dataset if capable', function(assert) {
+    assert.plan(1);
+    var osrm = new OSRM({algorithm: 'CH', path: monaco_corech_path});
+    assert.ok(osrm);
+});
+
+test('constructor: throws if data doesn\'t match algorithm', function(assert) {
+    assert.plan(3);
+    assert.throws(function() { new OSRM({algorithm: 'CoreCH', path: monaco_mld_path}); }, 'CoreCH with MLD data');
+    assert.ok(function() { new OSRM({algorithm: 'CoreCH', path: monaco_path}); }, 'CoreCH with CH data');
+    assert.throws(function() { new OSRM({algorithm: 'MLD', path: monaco_path}); }, 'MLD with CH data');
+});
+
+test('constructor: parses custom limits', function(assert) {
+    assert.plan(1);
+    var osrm = new OSRM({
+        path: monaco_mld_path,
+        algorithm: 'MLD',
+        max_locations_trip: 1,
+        max_locations_viaroute: 1,
+        max_locations_distance_table: 1,
+        max_locations_map_matching: 1,
+        max_results_nearest: 1,
+        max_alternatives: 1,
+    });
+    assert.ok(osrm);
+});
+
+test('constructor: throws on invalid custom limits', function(assert) {
+    assert.plan(1);
+    assert.throws(function() {
+        var osrm = new OSRM({
+            path: monaco_mld_path,
+            algorithm: 'MLD',
+            max_locations_trip: 'unlimited',
+            max_locations_viaroute: true,
+            max_locations_distance_table: false,
+            max_locations_map_matching: 'a lot',
+            max_results_nearest: null,
+            max_alternatives: '10'
+        })
+    });
 });
 
 require('./route.js');

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,48 +30,50 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/filesystem/path.hpp>
 
+#include <chrono>
 #include <string>
+
+#include "storage/io_config.hpp"
+#include "storage/storage_config.hpp"
 
 namespace osrm
 {
 namespace updater
 {
 
-struct UpdaterConfig final
+struct UpdaterConfig final : storage::IOConfig
 {
-    // Infer the output names from the path of the .osrm file
-    void UseDefaultOutputNames()
+    UpdaterConfig()
+        : IOConfig(
+              {
+                  ".osrm.ebg",
+                  ".osrm.turn_weight_penalties",
+                  ".osrm.turn_duration_penalties",
+                  ".osrm.turn_penalties_index",
+                  ".osrm.nbg_nodes",
+                  ".osrm.ebg_nodes",
+                  ".osrm.edges",
+                  ".osrm.geometry",
+                  ".osrm.fileIndex",
+                  ".osrm.properties",
+                  ".osrm.restrictions",
+              },
+              {},
+              {".osrm.datasource_names"})
     {
-        edge_based_graph_path = osrm_input_path.string() + ".ebg";
-        turn_weight_penalties_path = osrm_input_path.string() + ".turn_weight_penalties";
-        turn_duration_penalties_path = osrm_input_path.string() + ".turn_duration_penalties";
-        turn_penalties_index_path = osrm_input_path.string() + ".turn_penalties_index";
-        node_based_graph_path = osrm_input_path.string() + ".nodes";
-        edge_data_path = osrm_input_path.string() + ".edges";
-        geometry_path = osrm_input_path.string() + ".geometry";
-        rtree_leaf_path = osrm_input_path.string() + ".fileIndex";
-        datasource_names_path = osrm_input_path.string() + ".datasource_names";
-        profile_properties_path = osrm_input_path.string() + ".properties";
     }
 
-    boost::filesystem::path osrm_input_path;
-
-    std::string edge_based_graph_path;
-
-    std::string turn_weight_penalties_path;
-    std::string turn_duration_penalties_path;
-    std::string turn_penalties_index_path;
-    std::string node_based_graph_path;
-    std::string edge_data_path;
-    std::string geometry_path;
-    std::string rtree_leaf_path;
+    void UseDefaultOutputNames(const boost::filesystem::path &base)
+    {
+        IOConfig::UseDefaultOutputNames(base);
+    }
 
     double log_edge_updates_factor;
+    std::time_t valid_now;
 
     std::vector<std::string> segment_speed_lookup_paths;
     std::vector<std::string> turn_penalty_lookup_paths;
-    std::string datasource_names_path;
-    std::string profile_properties_path;
+    std::string tz_file_path;
 };
 }
 }

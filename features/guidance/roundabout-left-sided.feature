@@ -3,11 +3,10 @@ Feature: Basic Roundabout
 
     Background:
         Given a grid size of 10 meters
-        Given the profile file
-           """
-           require 'car'
-            properties.left_hand_driving = true
-           """
+        Given the profile file "car" initialized with
+            """
+            profile.properties.left_hand_driving = true
+            """
 
     Scenario: Roundabout exit counting for left sided driving
         And a grid size of 10 meters
@@ -53,7 +52,7 @@ Feature: Basic Roundabout
            | behkb | roundabout | yes    |
 
         When I route I should get
-           | waypoints | route       | turns                           |
-           | c,a       | cba,cba,cba | depart,roundabout-exit-1,arrive |
-           | l,a       | lkj,cba,cba | depart,roundabout-exit-2,arrive |
-           | i,a       | ihg,cba,cba | depart,roundabout-exit-3,arrive |
+           | waypoints | route           | turns                                                    |
+           | c,a       | cba,cba,cba     | depart,exit roundabout left,arrive                       |
+           | l,a       | lkj,cba,cba,cba | depart,roundabout-exit-2,exit roundabout straight,arrive |
+           | i,a       | ihg,cba,cba,cba | depart,roundabout-exit-3,exit roundabout straight,arrive |

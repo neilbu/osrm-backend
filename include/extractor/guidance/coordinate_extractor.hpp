@@ -153,6 +153,14 @@ class CoordinateExtractor
                       const double length,
                       const double rate) const;
 
+    // find the coordinate at a specific distance in the vector
+    util::Coordinate
+    ExtractCoordinateAtLength(const double distance,
+                              const std::vector<util::Coordinate> &coordinates) const;
+    util::Coordinate ExtractCoordinateAtLength(const double distance,
+                                               const std::vector<util::Coordinate> &coordinates,
+                                               const std::vector<double> &length_cache) const;
+
   private:
     const util::NodeBasedDynamicGraph &node_based_graph;
     const extractor::CompressedEdgeContainer &compressed_geometries;
@@ -217,7 +225,7 @@ class CoordinateExtractor
                  const std::vector<double> &segment_distances,
                  const double segment_length,
                  const double considered_lane_width,
-                 const util::NodeBasedEdgeData &edge_data) const;
+                 const extractor::NodeBasedEdgeClassification &edge_data) const;
 
     /*
      * If the very first coordinate is within lane offsets and the rest offers a near straight line,
@@ -241,14 +249,6 @@ class CoordinateExtractor
                         const double segment_length,
                         const std::vector<double> &segment_distances,
                         const std::uint8_t considered_lanes) const;
-
-    // find the coordinate at a specific location in the vector
-    util::Coordinate ExtractCoordinateAtLength(const double distance,
-                                               const std::vector<util::Coordinate> &coordinates,
-                                               const std::vector<double> &length_cache) const;
-    util::Coordinate
-    ExtractCoordinateAtLength(const double distance,
-                              const std::vector<util::Coordinate> &coordinates) const;
 };
 
 } // namespace guidance

@@ -201,14 +201,14 @@ Feature: Simple Turns
             | ef      | residential  | road | 2     | yes    |
 
        When I route I should get
-            | waypoints | route          | turns                        | locations |
-            | a,c       | road,road      | depart,arrive                | a,c       |
-            | c,a       | road,road      | depart,arrive                | c,a       |
-            | g,a       | turn,road,road | depart,turn left,arrive      | g,b,a     |
-            | g,c       | turn,road,road | depart,turn right,arrive     | g,b,c     |
-            | g,f       | turn,road,road | depart,turn left,arrive      | g,e,f     |
-            | c,f       | road,road,road | depart,continue right,arrive | c,b,f     |
-            | a,f       | road,road,road | depart,continue uturn,arrive | a,b,f     |
+            | waypoints | route          | turns                          | locations |
+            | a,c       | road,road      | depart,arrive                  | a,c       |
+            | c,a       | road,road      | depart,arrive                  | c,a       |
+            | g,a       | turn,road,road | depart,turn left,arrive        | g,b,a     |
+            | g,c       | turn,road,road | depart,turn right,arrive       | g,b,c     |
+            | g,f       | turn,road,road | depart,end of road left,arrive | g,e,f     |
+            | c,f       | road,road,road | depart,turn right,arrive       | c,b,f     |
+            | a,f       | road,road,road | depart,continue uturn,arrive   | a,b,f     |
 
     # http://www.openstreetmap.org/#map=19/52.48753/13.52838
     Scenario: Traffic Circle
@@ -248,8 +248,8 @@ Feature: Simple Turns
             | bcdefghijklmnob | residential | road | 1     | yes    | roundabout |
 
        When I route I should get
-            | waypoints | route               | turns                                         | intersections                                                            |
-            | a,p       | road,road,road      | depart,roundabout turn straight exit-1,arrive | true:90;true:165 false:270 false:345,true:90 false:180 true:345;true:270 |
+            | waypoints | route          | turns                                         | intersections                                                            |
+            | a,p       | road,road,road | depart,roundabout turn straight exit-1,arrive | true:90;true:165 false:270 false:345,true:90 false:180 true:345;true:270 |
 
     Scenario: Splitting Road with many lanes
         Given the node map
@@ -274,6 +274,35 @@ Feature: Simple Turns
             | ab    | primary | road | 4     | no     |
             | bcd   | primary | road | 2     | yes    |
             | efb   | primary | road | 2     | yes    |
+
+        When I route I should get
+            | waypoints | route     | turns         |
+            | a,d       | road,road | depart,arrive |
+            | e,a       | road,road | depart,arrive |
+
+    Scenario: Splitting Road with many lanes; same as above makes sure len(turn:lanes) work as expected
+        Given the node map
+            """
+                              f - - - - - - - - - - - - - - - - - - - - e
+                             '
+                            '
+                           '
+                          '
+                         '
+            a - - - - - b
+                         '
+                          '
+                           '
+                            '
+                             '
+                              c - - - - - - - - - - - - - - - - - - - - d
+            """
+
+        And the ways
+            | nodes | highway | name | turn:lanes               | oneway |
+            | ab    | primary | road | left\|left\|right\|right | no     |
+            | bcd   | primary | road | through\|through         | yes    |
+            | efb   | primary | road | through\|through         | yes    |
 
         When I route I should get
             | waypoints | route     | turns         |
@@ -809,14 +838,14 @@ Feature: Simple Turns
 
         When I route I should get
             | waypoints | route               | turns                    | intersections                                         |
-            | a,g       | Perle,Heide,Heide   | depart,turn right,arrive | true:90;true:90 true:180 false:270 true:345;true:18   |
-            | a,k       | Perle,Friede,Friede | depart,turn left,arrive  | true:90;true:90 true:180 false:270 true:345;true:153  |
-            | a,e       | Perle,Perle         | depart,arrive            | true:90,true:90 true:180 false:270 true:345;true:270  |
-            | e,k       | Perle,Friede,Friede | depart,turn right,arrive | true:270;false:90 true:180 true:270 true:345;true:153 |
-            | e,g       | Perle,Heide,Heide   | depart,turn left,arrive  | true:270;false:90 true:180 true:270 true:345;true:18  |
-            | h,k       | Heide,Friede        | depart,arrive            | true:16,true:90 true:180 true:270 true:345;true:153   |
-            | h,e       | Heide,Perle,Perle   | depart,turn right,arrive | true:16;true:90 true:180 true:270 true:345;true:270   |
-            | h,a       | Heide,Perle,Perle   | depart,turn left,arrive  | true:16;true:90 true:180 true:270 true:345;true:90    |
+            | a,g       | Perle,Heide,Heide   | depart,turn right,arrive | true:90;true:90 true:195 false:270 true:345;true:18   |
+            | a,k       | Perle,Friede,Friede | depart,turn left,arrive  | true:90;true:90 true:195 false:270 true:345;true:153  |
+            | a,e       | Perle,Perle         | depart,arrive            | true:90,true:90 true:195 false:270 true:345;true:270  |
+            | e,k       | Perle,Friede,Friede | depart,turn right,arrive | true:270;false:90 true:195 true:270 true:345;true:153 |
+            | e,g       | Perle,Heide,Heide   | depart,turn left,arrive  | true:270;false:90 true:195 true:270 true:345;true:18  |
+            | h,k       | Heide,Friede        | depart,arrive            | true:16,true:90 true:195 true:270 true:345;true:153   |
+            | h,e       | Heide,Perle,Perle   | depart,turn right,arrive | true:16;true:90 true:195 true:270 true:345;true:270   |
+            | h,a       | Heide,Perle,Perle   | depart,turn left,arrive  | true:16;true:90 true:195 true:270 true:345;true:90    |
 
     #http://www.openstreetmap.org/#map=19/52.53293/13.32956
     Scenario: Curved Exit from Curved Road
@@ -1006,8 +1035,8 @@ Feature: Simple Turns
             | waypoints | route               | turns                          |
             | a,e       | Heide,Heide,Heide   | depart,continue uturn,arrive   |
             | a,g       | Heide,Fenn,Fenn     | depart,turn right,arrive       |
-            | a,h       | Heide,Friede,Friede | depart,turn slight left,arrive |
-            | i,e       | Perle,Heide,Heide   | depart,turn right,arrive       |
+            | a,h       | Heide,Friede,Friede | depart,turn left,arrive        |
+            | i,e       | Perle,Heide,Heide   | depart,turn sharp right,arrive |
             | i,h       | Perle,Friede,Friede | depart,turn left,arrive        |
 
     #http://www.openstreetmap.org/#map=19/52.48630/13.36017
@@ -1189,7 +1218,7 @@ Feature: Simple Turns
 
         When I route I should get
             | waypoints | route             | turns                           |
-            | a,c       | rose,trift        | depart,arrive                   |
+            | a,c       | rose,trift,trift  | depart,turn slight left,arrive  |
             | a,k       | rose,muhle,muhle  | depart,turn slight right,arrive |
             | d,f       | trift,rose        | depart,arrive                   |
             | d,k       | trift,muhle,muhle | depart,turn sharp left,arrive   |
@@ -1312,16 +1341,16 @@ Feature: Simple Turns
 
         # we don't care for turn instructions, this is a coordinate extraction bug check
         When I route I should get
-            | waypoints | route      | intersections                                |
-            | a,g       | ab,bcdefgh | true:90,true:45 false:180 false:270;true:180 |
+            | waypoints | route              | intersections                                |
+            | a,g       | ab,bcdefgh,bcdefgh | true:90;true:45 false:180 false:270;true:180 |
 
     #https://github.com/Project-OSRM/osrm-backend/pull/3469#issuecomment-270806580
     Scenario: Oszillating Lower Priority Road
-		#Given the node map
-	#		"""
-	#		a -db    c
+        #Given the node map
+    #       """
+    #       a -db    c
     #           f
-    #   	"""
+    #       """
         Given the node locations
             | node | lat                | lon                | #          |
             | a    | 1.0                | 1.0                |            |
@@ -1371,3 +1400,76 @@ Feature: Simple Turns
         When I route I should get
             | waypoints | route       |
             | g,e       | abcde,abcde |
+
+    # 4205
+    # https://www.openstreetmap.org/node/36153635#map=19/51.97548/7.61795
+    Scenario: merging onto a through street
+        Given the node map
+            """
+                          e
+                           `
+                            `
+                             `
+                              `
+                               d
+                                c
+            a - - - - - - - b``
+                                  `
+
+                                     `
+
+                                        `
+
+                                           `
+
+                                              `
+
+                                                  `
+
+                                                      `
+
+                                                          `
+
+                                                              `
+
+                                                                  `
+
+                                                                      `
+
+                                                                          `
+
+                                                                              `
+
+                                                                                  `
+
+                                                                                      `
+
+                                                                                          `
+
+                                                                                              `
+
+                                                                                                 `
+                                                                                                   `
+
+                                                                                                       `
+
+
+                                                                                                            `
+
+
+                                                                                                                `
+
+
+                                                                                                                    f
+
+            """
+
+        And the ways
+            | nodes | oneway | name |
+            | abc   | yes    | fww  |
+            | fcde  | no     | jahn |
+
+        When I route I should get
+            | waypoints | route         | turns                    |
+            | a,f       | fww,jahn,jahn | depart,turn right,arrive |
+            | a,e       | fww,jahn,jahn | depart,turn left,arrive  |

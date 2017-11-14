@@ -1,7 +1,6 @@
 #ifndef GRAPH_LOADER_HPP
 #define GRAPH_LOADER_HPP
 
-#include "extractor/external_memory_node.hpp"
 #include "extractor/node_based_edge.hpp"
 #include "extractor/packed_osm_ids.hpp"
 #include "extractor/query_node.hpp"
@@ -32,24 +31,6 @@ namespace util
 {
 
 /**
- * Reads the .restrictions file and loads it to a vector.
- * The since the restrictions reference nodes using their external node id,
- * we need to renumber it to the new internal id.
-*/
-inline unsigned loadRestrictionsFromFile(storage::io::FileReader &file_reader,
-                                         std::vector<extractor::TurnRestriction> &restriction_list)
-{
-    auto number_of_usable_restrictions = file_reader.ReadElementCount64();
-    restriction_list.resize(number_of_usable_restrictions);
-    if (number_of_usable_restrictions > 0)
-    {
-        file_reader.ReadInto(restriction_list.data(), number_of_usable_restrictions);
-    }
-
-    return number_of_usable_restrictions;
-}
-
-/**
  * Reads the beginning of an .osrm file and produces:
  *  - barrier nodes
  *  - traffic lights
@@ -68,7 +49,7 @@ NodeID loadNodesFromFile(storage::io::FileReader &file_reader,
     coordinates.resize(number_of_nodes);
     osm_node_ids.reserve(number_of_nodes);
 
-    extractor::ExternalMemoryNode current_node;
+    extractor::QueryNode current_node;
     for (NodeID i = 0; i < number_of_nodes; ++i)
     {
         file_reader.ReadInto(&current_node, 1);
@@ -76,18 +57,18 @@ NodeID loadNodesFromFile(storage::io::FileReader &file_reader,
         coordinates[i].lon = current_node.lon;
         coordinates[i].lat = current_node.lat;
         osm_node_ids.push_back(current_node.node_id);
+    }
 
-        if (current_node.barrier)
-        {
-            *barriers = i;
-            ++barriers;
-        }
+    auto num_barriers = file_reader.ReadElementCount64();
+    for (auto index = 0UL; index < num_barriers; ++index)
+    {
+        *barriers++ = file_reader.ReadOne<NodeID>();
+    }
 
-        if (current_node.traffic_lights)
-        {
-            *traffic_signals = i;
-            ++traffic_signals;
-        }
+    auto num_lights = file_reader.ReadElementCount64();
+    for (auto index = 0UL; index < num_lights; ++index)
+    {
+        *traffic_signals++ = file_reader.ReadOne<NodeID>();
     }
 
     return number_of_nodes;
@@ -96,7 +77,7 @@ NodeID loadNodesFromFile(storage::io::FileReader &file_reader,
 /**
  * Reads a .osrm file and produces the edges.
  */
-inline NodeID loadEdgesFromFile(storage::io::FileReader &file_reader,
+inline EdgeID loadEdgesFromFile(storage::io::FileReader &file_reader,
                                 std::vector<extractor::NodeBasedEdge> &edge_list)
 {
     auto number_of_edges = file_reader.ReadElementCount64();
@@ -123,8 +104,7 @@ inline NodeID loadEdgesFromFile(storage::io::FileReader &file_reader,
         const auto &prev_edge = edge_list[i - 1];
 
         BOOST_ASSERT_MSG(edge.weight > 0, "loaded null weight");
-        BOOST_ASSERT_MSG(edge.forward, "edge must be oriented in forward direction");
-        BOOST_ASSERT_MSG(edge.travel_mode != TRAVEL_MODE_INACCESSIBLE, "loaded non-accessible");
+        BOOST_ASSERT_MSG(edge.flags.forward, "edge must be oriented in forward direction");
 
         BOOST_ASSERT_MSG(edge.source != edge.target, "loaded edges contain a loop");
         BOOST_ASSERT_MSG(edge.source != prev_edge.source || edge.target != prev_edge.target,
@@ -135,6 +115,15 @@ inline NodeID loadEdgesFromFile(storage::io::FileReader &file_reader,
     Log() << "Graph loaded ok and has " << edge_list.size() << " edges";
 
     return number_of_edges;
+}
+
+inline EdgeID loadAnnotationData(storage::io::FileReader &file_reader,
+                                 std::vector<extractor::NodeBasedEdgeAnnotation> &metadata)
+{
+    auto const meta_data_count = file_reader.ReadElementCount64();
+    metadata.resize(meta_data_count);
+    file_reader.ReadInto(metadata.data(), meta_data_count);
+    return meta_data_count;
 }
 }
 }

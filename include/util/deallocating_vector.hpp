@@ -1,10 +1,12 @@
 #ifndef DEALLOCATING_VECTOR_HPP
 #define DEALLOCATING_VECTOR_HPP
 
+#include "storage/io_fwd.hpp"
 #include "util/integer_range.hpp"
 
 #include <boost/iterator/iterator_facade.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -13,7 +15,23 @@ namespace osrm
 {
 namespace util
 {
+template <typename ElementT> class DeallocatingVector;
+}
 
+namespace storage
+{
+namespace serialization
+{
+template <typename T>
+inline void read(storage::io::FileReader &reader, util::DeallocatingVector<T> &vec);
+
+template <typename T>
+inline void write(storage::io::FileWriter &writer, const util::DeallocatingVector<T> &vec);
+}
+}
+
+namespace util
+{
 template <typename ElementT> struct ConstDeallocatingVectorIteratorState
 {
     ConstDeallocatingVectorIteratorState()
@@ -165,93 +183,56 @@ class DeallocatingVectorIterator
     }
 };
 
-template <typename ElementT, std::size_t ELEMENTS_PER_BLOCK>
-class DeallocatingVectorRemoveIterator
-    : public boost::iterator_facade<DeallocatingVectorRemoveIterator<ElementT, ELEMENTS_PER_BLOCK>,
-                                    ElementT,
-                                    boost::forward_traversal_tag>
+template <typename T> void swap(DeallocatingVector<T> &lhs, DeallocatingVector<T> &rhs);
+
+template <typename ElementT> class DeallocatingVector
 {
-    DeallocatingVectorIteratorState<ElementT> current_state;
-
-  public:
-    DeallocatingVectorRemoveIterator(std::size_t idx, std::vector<ElementT *> *input_list)
-        : current_state(idx, input_list)
-    {
-    }
-
-    friend class boost::iterator_core_access;
-
-    void increment()
-    {
-        const std::size_t old_bucket = current_state.index / ELEMENTS_PER_BLOCK;
-
-        ++current_state.index;
-        const std::size_t new_bucket = current_state.index / ELEMENTS_PER_BLOCK;
-        if (old_bucket != new_bucket)
-        {
-            // delete old bucket entry
-            if (nullptr != current_state.bucket_list->at(old_bucket))
-            {
-                delete[] current_state.bucket_list->at(old_bucket);
-                current_state.bucket_list->at(old_bucket) = nullptr;
-            }
-        }
-    }
-
-    bool equal(DeallocatingVectorRemoveIterator const &other) const
-    {
-        return current_state.index == other.current_state.index;
-    }
-
-    std::ptrdiff_t distance_to(DeallocatingVectorRemoveIterator const &other) const
-    {
-        return other.current_state.index - current_state.index;
-    }
-
-    ElementT &dereference() const
-    {
-        const std::size_t current_bucket = current_state.index / ELEMENTS_PER_BLOCK;
-        const std::size_t current_index = current_state.index % ELEMENTS_PER_BLOCK;
-        return (current_state.bucket_list->at(current_bucket)[current_index]);
-    }
-};
-
-template <typename ElementT, std::size_t ELEMENTS_PER_BLOCK> class DeallocatingVector;
-
-template <typename T, std::size_t S>
-void swap(DeallocatingVector<T, S> &lhs, DeallocatingVector<T, S> &rhs);
-
-template <typename ElementT, std::size_t ELEMENTS_PER_BLOCK = 8388608 / sizeof(ElementT)>
-class DeallocatingVector
-{
+    static constexpr std::size_t ELEMENTS_PER_BLOCK = 8388608 / sizeof(ElementT);
     std::size_t current_size;
     std::vector<ElementT *> bucket_list;
 
   public:
+    using value_type = ElementT;
     using iterator = DeallocatingVectorIterator<ElementT, ELEMENTS_PER_BLOCK>;
     using const_iterator = ConstDeallocatingVectorIterator<ElementT, ELEMENTS_PER_BLOCK>;
-
-    // this forward-only iterator deallocates all buckets that have been visited
-    using deallocation_iterator = DeallocatingVectorRemoveIterator<ElementT, ELEMENTS_PER_BLOCK>;
 
     DeallocatingVector() : current_size(0)
     {
         bucket_list.emplace_back(new ElementT[ELEMENTS_PER_BLOCK]);
     }
 
-    // copying is not safe since this would only do a shallow copy
-    DeallocatingVector(DeallocatingVector &other) = delete;
-    DeallocatingVector &operator=(DeallocatingVector &other) = delete;
+    // Performs a deep copy of the buckets
+    DeallocatingVector(const DeallocatingVector &other)
+    {
+        bucket_list.resize(other.bucket_list.size());
+        for (const auto index : util::irange<std::size_t>(0, bucket_list.size()))
+        {
+            bucket_list[index] = new ElementT[ELEMENTS_PER_BLOCK];
+            std::copy_n(other.bucket_list[index], ELEMENTS_PER_BLOCK, bucket_list[index]);
+        }
+        current_size = other.current_size;
+    }
+    // Note we capture other by value
+    DeallocatingVector &operator=(const DeallocatingVector &other)
+    {
+        auto copy_other = other;
+        swap(copy_other);
+        return *this;
+    }
+
     // moving is fine
-    DeallocatingVector(DeallocatingVector &&other) = default;
-    DeallocatingVector &operator=(DeallocatingVector &&other) = default;
+    DeallocatingVector(DeallocatingVector &&other) { swap(other); }
+    DeallocatingVector &operator=(DeallocatingVector &&other)
+    {
+        swap(other);
+        return *this;
+    }
 
     ~DeallocatingVector() { clear(); }
 
-    friend void swap<>(DeallocatingVector<ElementT, ELEMENTS_PER_BLOCK> &lhs,
-                       DeallocatingVector<ElementT, ELEMENTS_PER_BLOCK> &rhs);
+    friend void swap<>(DeallocatingVector<ElementT> &lhs, DeallocatingVector<ElementT> &rhs);
 
-    void swap(DeallocatingVector<ElementT, ELEMENTS_PER_BLOCK> &other)
+    void swap(DeallocatingVector<ElementT> &other)
     {
         std::swap(current_size, other.current_size);
         bucket_list.swap(other.bucket_list);
@@ -333,13 +314,6 @@ class DeallocatingVector
 
     iterator end() { return iterator(size(), &bucket_list); }
 
-    deallocation_iterator dbegin()
-    {
-        return deallocation_iterator(static_cast<std::size_t>(0), &bucket_list);
-    }
-
-    deallocation_iterator dend() { return deallocation_iterator(size(), &bucket_list); }
-
     const_iterator begin() const
     {
         return const_iterator(static_cast<std::size_t>(0), &bucket_list);
@@ -377,10 +351,14 @@ class DeallocatingVector
             ++position;
         }
     }
+
+    friend void storage::serialization::read<ElementT>(storage::io::FileReader &reader,
+                                                       DeallocatingVector &vec);
+    friend void storage::serialization::write<ElementT>(storage::io::FileWriter &writer,
+                                                        const DeallocatingVector &vec);
 };
 
-template <typename T, std::size_t S>
-void swap(DeallocatingVector<T, S> &lhs, DeallocatingVector<T, S> &rhs)
+template <typename T> void swap(DeallocatingVector<T> &lhs, DeallocatingVector<T> &rhs)
 {
     lhs.swap(rhs);
 }

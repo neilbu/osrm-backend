@@ -1,3 +1,5 @@
+#include "extractor/travel_mode.hpp"
+
 #include "engine/guidance/assemble_geometry.hpp"
 #include "engine/guidance/assemble_leg.hpp"
 #include "engine/guidance/assemble_overview.hpp"
@@ -12,6 +14,7 @@ BOOST_AUTO_TEST_SUITE(guidance_assembly)
 
 BOOST_AUTO_TEST_CASE(trim_short_segments)
 {
+    using namespace osrm::extractor;
     using namespace osrm::extractor::guidance;
     using namespace osrm::engine::guidance;
     using namespace osrm::engine;
@@ -23,6 +26,7 @@ BOOST_AUTO_TEST_CASE(trim_short_segments)
                                            IntermediateIntersection::NO_INDEX,
                                            0,
                                            {0, 255},
+                                           {},
                                            {}};
     IntermediateIntersection intersection2{{FloatLongitude{-73.981495}, FloatLatitude{40.768275}},
                                            {180},
@@ -30,11 +34,13 @@ BOOST_AUTO_TEST_CASE(trim_short_segments)
                                            0,
                                            IntermediateIntersection::NO_INDEX,
                                            {0, 255},
+                                           {},
                                            {}};
 
     // Check that duplicated coordinate in the end is removed
     std::vector<RouteStep> steps = {{324,
                                      "Central Park West",
+                                     "",
                                      "",
                                      "",
                                      "",
@@ -55,6 +61,7 @@ BOOST_AUTO_TEST_CASE(trim_short_segments)
                                      {intersection1}},
                                     {324,
                                      "Central Park West",
+                                     "",
                                      "",
                                      "",
                                      "",

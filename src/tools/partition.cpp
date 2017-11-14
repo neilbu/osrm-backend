@@ -1,6 +1,7 @@
 #include "partition/partition_config.hpp"
 #include "partition/partitioner.hpp"
 
+#include "osrm/exception.hpp"
 #include "util/log.hpp"
 #include "util/meminfo.hpp"
 #include "util/timing_util.hpp"
@@ -68,11 +69,15 @@ void validate(boost::any &v, const std::vector<std::string> &values, MaxCellSize
     v = boost::any(MaxCellSizesArgument{output});
 }
 
-return_code parseArguments(int argc, char *argv[], partition::PartitionConfig &config)
+return_code
+parseArguments(int argc, char *argv[], std::string &verbosity, partition::PartitionConfig &config)
 {
     // declare a group of options that will be allowed only on command line
     boost::program_options::options_description generic_options("Options");
-    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message");
+    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message")(
+        "verbosity,l",
+        boost::program_options::value<std::string>(&verbosity)->default_value("INFO"),
+        std::string("Log verbosity level: " + util::LogPolicy::GetLevels()).c_str());
 
     // declare a group of options that will be allowed both on command line
     boost::program_options::options_description config_options("Configuration");
@@ -183,9 +188,10 @@ return_code parseArguments(int argc, char *argv[], partition::PartitionConfig &c
 int main(int argc, char *argv[]) try
 {
     util::LogPolicy::GetInstance().Unmute();
+    std::string verbosity;
     partition::PartitionConfig partition_config;
 
-    const auto result = parseArguments(argc, argv, partition_config);
+    const auto result = parseArguments(argc, argv, verbosity, partition_config);
 
     if (return_code::fail == result)
     {
@@ -197,8 +203,10 @@ int main(int argc, char *argv[]) try
         return EXIT_SUCCESS;
     }
 
+    util::LogPolicy::GetInstance().SetLevel(verbosity);
+
     // set the default in/output names
-    partition_config.UseDefaults();
+    partition_config.UseDefaultOutputNames(partition_config.base_path);
 
     if (1 > partition_config.requested_num_threads)
     {
@@ -218,9 +226,9 @@ int main(int argc, char *argv[]) try
         }
     };
 
-    if (!check_file(partition_config.edge_based_graph_path) ||
-        !check_file(partition_config.cnbg_ebg_mapping_path) ||
-        !check_file(partition_config.compressed_node_based_graph_path))
+    if (!check_file(partition_config.GetPath(".osrm.ebg")) ||
+        !check_file(partition_config.GetPath(".osrm.cnbg_to_ebg")) ||
+        !check_file(partition_config.GetPath(".osrm.cnbg")))
     {
         return EXIT_FAILURE;
     }
@@ -238,8 +246,16 @@ int main(int argc, char *argv[]) try
 
     return exitcode;
 }
+catch (const osrm::RuntimeError &e)
+{
+    util::DumpMemoryStats();
+    util::Log(logERROR) << e.what();
+    return EXIT_FAILURE;
+    return e.GetCode();
+}
 catch (const std::bad_alloc &e)
 {
+    util::DumpMemoryStats();
     util::Log(logERROR) << "[exception] " << e.what();
     util::Log(logERROR) << "Please provide more memory or consider using a larger swapfile";
     return EXIT_FAILURE;

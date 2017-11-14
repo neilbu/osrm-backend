@@ -28,8 +28,7 @@ MatrixPlugin::MatrixPlugin(const int max_locations_distance_table)
 {
 }
 
-Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                                  const RoutingAlgorithmsInterface &algorithms,
+Status MatrixPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                                   const api::MatrixParameters &params,
                                   util::json::Object &result) const
 {
@@ -65,6 +64,7 @@ Status MatrixPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDat
         return Error("TooBig", "Too many table coordinates", result);
     }
    
+    const auto &facade = algorithms.GetFacade();
     auto snapped_phantoms = SnapPhantomNodes(GetPhantomNodes(facade, params));
 
     const bool continue_straight_at_waypoint = facade.GetContinueStraightDefault();

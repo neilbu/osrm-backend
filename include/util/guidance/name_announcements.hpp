@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -25,17 +26,85 @@ namespace guidance
 // Name Change Logic
 // Used both during Extraction as well as during Post-Processing
 
-inline std::pair<std::string, std::string> getPrefixAndSuffix(const std::string &data)
+inline std::string longest_common_substring(const std::string &lhs, const std::string &rhs)
 {
-    const auto suffix_pos = data.find_last_of(' ');
-    if (suffix_pos == std::string::npos)
-        return {};
+    if (lhs.empty() || rhs.empty())
+        return "";
 
-    const auto prefix_pos = data.find_first_of(' ');
-    auto result = std::make_pair(data.substr(0, prefix_pos), data.substr(suffix_pos + 1));
-    boost::to_lower(result.first);
-    boost::to_lower(result.second);
-    return result;
+    // array for dynamic programming
+    std::vector<std::uint32_t> dp_previous(rhs.size(), 0), dp_current(rhs.size(), 0);
+
+    // to remember the best location
+    std::uint32_t best = 0;
+    std::uint32_t best_pos = 0;
+    using std::swap;
+    for (std::uint32_t i = 0; i < lhs.size(); ++i)
+    {
+        for (std::uint32_t j = 0; j < rhs.size(); ++j)
+        {
+            if (lhs[i] == rhs[j])
+            {
+                dp_current[j] = (j == 0) ? 1 : (dp_previous[j - 1] + 1);
+                if (dp_current[j] > best)
+                {
+                    best = dp_current[j];
+                    best_pos = i + 1;
+                }
+            }
+        }
+        swap(dp_previous, dp_current);
+    }
+    // the best position marks the end of the string
+    return lhs.substr(best_pos - best, best);
+}
+
+// TODO US-ASCII support only, no UTF-8 support
+// While UTF-8 might work in some cases, we do not guarantee full functionality
+inline auto decompose(const std::string &lhs, const std::string &rhs)
+{
+    auto const lcs = longest_common_substring(lhs, rhs);
+
+    // trim spaces, transform to lower
+    const auto trim = [](auto str) {
+        // we compare suffixes based on this value, it might break UTF chars, but as long as we are
+        // consistent in handling, we do not create bad results
+        boost::to_lower(str);
+        auto front = str.find_first_not_of(" ");
+
+        if (front == std::string::npos)
+            return str;
+
+        auto back = str.find_last_not_of(" ");
+        return str.substr(front, back - front + 1);
+    };
+
+    if (lcs.empty())
+    {
+        std::string empty = "";
+        return std::make_tuple(trim(lhs), trim(rhs), empty, empty);
+    }
+
+    // find the common substring in both
+    auto lhs_pos = lhs.find(lcs);
+    auto rhs_pos = rhs.find(lcs);
+
+    BOOST_ASSERT(lhs_pos + lcs.size() <= lhs.size());
+    BOOST_ASSERT(rhs_pos + lcs.size() <= rhs.size());
+
+    // prefixes
+    std::string lhs_prefix = (lhs_pos > 0) ? lhs.substr(0, lhs_pos) : "";
+    std::string rhs_prefix = (rhs_pos > 0) ? rhs.substr(0, rhs_pos) : "";
+
+    // suffices
+    std::string lhs_suffix = lhs.substr(lhs_pos + lcs.size());
+    std::string rhs_suffix = rhs.substr(rhs_pos + lcs.size());
+
+    lhs_prefix = trim(std::move(lhs_prefix));
+    lhs_suffix = trim(std::move(lhs_suffix));
+    rhs_prefix = trim(std::move(rhs_prefix));
+    rhs_suffix = trim(std::move(rhs_suffix));
+
+    return std::make_tuple(lhs_prefix, lhs_suffix, rhs_prefix, rhs_suffix);
 }
 
 // Note: there is an overload without suffix checking below.
@@ -44,9 +113,11 @@ template <typename SuffixTable>
 inline bool requiresNameAnnounced(const std::string &from_name,
                                   const std::string &from_ref,
                                   const std::string &from_pronunciation,
+                                  const std::string &from_exits,
                                   const std::string &to_name,
                                   const std::string &to_ref,
                                   const std::string &to_pronunciation,
+                                  const std::string &to_exits,
                                   const SuffixTable &suffix_table)
 {
     // first is empty and the second is not
@@ -62,50 +133,19 @@ inline bool requiresNameAnnounced(const std::string &from_name,
     const auto name_is_contained =
         boost::starts_with(from_name, to_name) || boost::starts_with(to_name, from_name);
 
-    const auto checkForPrefixOrSuffixChange = [](
-        const std::string &first, const std::string &second, const SuffixTable &suffix_table) {
+    const auto checkForPrefixOrSuffixChange =
+        [](const std::string &first, const std::string &second, const SuffixTable &suffix_table) {
+            std::string first_prefix, first_suffix, second_prefix, second_suffix;
+            std::tie(first_prefix, first_suffix, second_prefix, second_suffix) =
+                decompose(first, second);
 
-        const auto first_prefix_and_suffixes = getPrefixAndSuffix(first);
-        const auto second_prefix_and_suffixes = getPrefixAndSuffix(second);
+            const auto checkTable = [&](const std::string &str) {
+                return str.empty() || suffix_table.isSuffix(str);
+            };
 
-        // reverse strings, get suffices and reverse them to get prefixes
-        const auto checkTable = [&](const std::string &str) {
-            return str.empty() || suffix_table.isSuffix(str);
+            return checkTable(first_prefix) && checkTable(first_suffix) &&
+                   checkTable(second_prefix) && checkTable(second_suffix);
         };
-
-        const auto getOffset = [](const std::string &str) -> std::size_t {
-            if (str.empty())
-                return 0;
-            else
-                return str.length() + 1;
-        };
-
-        const bool is_prefix_change = [&]() -> bool {
-            if (!checkTable(first_prefix_and_suffixes.first))
-                return false;
-            if (!checkTable(second_prefix_and_suffixes.first))
-                return false;
-            return !first.compare(getOffset(first_prefix_and_suffixes.first),
-                                  std::string::npos,
-                                  second,
-                                  getOffset(second_prefix_and_suffixes.first),
-                                  std::string::npos);
-        }();
-
-        const bool is_suffix_change = [&]() -> bool {
-            if (!checkTable(first_prefix_and_suffixes.second))
-                return false;
-            if (!checkTable(second_prefix_and_suffixes.second))
-                return false;
-            return !first.compare(0,
-                                  first.length() - getOffset(first_prefix_and_suffixes.second),
-                                  second,
-                                  0,
-                                  second.length() - getOffset(second_prefix_and_suffixes.second));
-        }();
-
-        return is_prefix_change || is_suffix_change;
-    };
 
     const auto is_suffix_change = checkForPrefixOrSuffixChange(from_name, to_name, suffix_table);
     const auto names_are_equal = from_name == to_name || name_is_contained || is_suffix_change;
@@ -123,21 +163,40 @@ inline bool requiresNameAnnounced(const std::string &from_name,
         (names_are_equal && ref_is_removed) || is_suffix_change;
 
     const auto needs_announce =
-        // " (Ref)" -> "Name "
-        (from_name.empty() && !from_ref.empty() && !to_name.empty() && to_ref.empty());
+        // " (Ref)" -> "Name " and reverse
+        (from_name.empty() && !from_ref.empty() && !to_name.empty() && to_ref.empty()) ||
+        (!from_name.empty() && from_ref.empty() && to_name.empty() && !to_ref.empty());
 
     const auto pronunciation_changes = from_pronunciation != to_pronunciation;
 
-    return !obvious_change || needs_announce || pronunciation_changes;
+    // when exiting onto ramps, we need to be careful about exit numbers. These can often be only
+    // assigned to the first part of the ramp
+    //
+    //  a . . b . c . . d
+    //         ` e . . f
+    //
+    // could assign the exit number to `be` when exiting `abcd` instead of the full ramp.
+    //
+    // Issuing a new-name instruction here would result in the turn assuming the short segment to be
+    // irrelevant and remove the exit number in a collapse scenario. We don't want to issue any
+    // instruction from be-ef, since we only loose the exit number. So we want to make sure that we
+    // don't just loose an exit number, when exits change
+    const auto exits_change = from_exits != to_exits;
+    const auto looses_exit = (names_are_equal && !from_exits.empty() && to_exits.empty());
+
+    return !obvious_change || needs_announce || pronunciation_changes ||
+           (exits_change && !looses_exit);
 }
 
 // Overload without suffix checking
 inline bool requiresNameAnnounced(const std::string &from_name,
                                   const std::string &from_ref,
                                   const std::string &from_pronunciation,
+                                  const std::string &from_exits,
                                   const std::string &to_name,
                                   const std::string &to_ref,
-                                  const std::string &to_pronunciation)
+                                  const std::string &to_pronunciation,
+                                  const std::string &to_exits)
 {
     // Dummy since we need to provide a SuffixTable but do not have the data for it.
     // (Guidance Post-Processing does not keep the suffix table around at the moment)
@@ -147,8 +206,15 @@ inline bool requiresNameAnnounced(const std::string &from_name,
         bool isSuffix(const std::string &) const { return false; }
     } static const table;
 
-    return requiresNameAnnounced(
-        from_name, from_ref, from_pronunciation, to_name, to_ref, to_pronunciation, table);
+    return requiresNameAnnounced(from_name,
+                                 from_ref,
+                                 from_pronunciation,
+                                 from_exits,
+                                 to_name,
+                                 to_ref,
+                                 to_pronunciation,
+                                 to_exits,
+                                 table);
 }
 
 inline bool requiresNameAnnounced(const NameID from_name_id,
@@ -162,9 +228,13 @@ inline bool requiresNameAnnounced(const NameID from_name_id,
         return requiresNameAnnounced(name_table.GetNameForID(from_name_id).to_string(),
                                      name_table.GetRefForID(from_name_id).to_string(),
                                      name_table.GetPronunciationForID(from_name_id).to_string(),
+                                     name_table.GetExitsForID(from_name_id).to_string(),
+                                     //
                                      name_table.GetNameForID(to_name_id).to_string(),
                                      name_table.GetRefForID(to_name_id).to_string(),
                                      name_table.GetPronunciationForID(to_name_id).to_string(),
+                                     name_table.GetExitsForID(to_name_id).to_string(),
+                                     //
                                      suffix_table);
     // FIXME: converts StringViews to strings since the name change heuristics mutates in place
 }
@@ -179,8 +249,11 @@ inline bool requiresNameAnnounced(const NameID from_name_id,
         return requiresNameAnnounced(name_table.GetNameForID(from_name_id).to_string(),
                                      name_table.GetRefForID(from_name_id).to_string(),
                                      name_table.GetPronunciationForID(from_name_id).to_string(),
+                                     name_table.GetExitsForID(from_name_id).to_string(),
+                                     //
                                      name_table.GetNameForID(to_name_id).to_string(),
                                      name_table.GetRefForID(to_name_id).to_string(),
+                                     name_table.GetExitsForID(to_name_id).to_string(),
                                      name_table.GetPronunciationForID(to_name_id).to_string());
     // FIXME: converts StringViews to strings since the name change heuristics mutates in place
 }

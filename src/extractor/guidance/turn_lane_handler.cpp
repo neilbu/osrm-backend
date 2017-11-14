@@ -34,15 +34,15 @@ std::size_t getNumberOfTurns(const Intersection &intersection)
 } // namespace
 
 TurnLaneHandler::TurnLaneHandler(const util::NodeBasedDynamicGraph &node_based_graph,
-                                 std::vector<std::uint32_t> &turn_lane_offsets,
-                                 std::vector<TurnLaneType::Mask> &turn_lane_masks,
+                                 const EdgeBasedNodeDataContainer &node_data_container,
                                  LaneDescriptionMap &lane_description_map,
                                  const TurnAnalysis &turn_analysis,
                                  util::guidance::LaneDataIdMap &id_map)
-    : node_based_graph(node_based_graph), turn_lane_offsets(turn_lane_offsets),
-      turn_lane_masks(turn_lane_masks), lane_description_map(lane_description_map),
-      turn_analysis(turn_analysis), id_map(id_map)
+    : node_based_graph(node_based_graph), node_data_container(node_data_container),
+      lane_description_map(lane_description_map), turn_analysis(turn_analysis), id_map(id_map)
 {
+    std::tie(turn_lane_offsets, turn_lane_masks) =
+        transformTurnLaneMapIntoArrays(lane_description_map);
     count_handled = count_called = 0;
 }
 
@@ -150,7 +150,7 @@ TurnLaneScenario TurnLaneHandler::deduceScenario(const NodeID at,
                                                  LaneDescriptionID &previous_description_id)
 {
     // as long as we don't want to emit lanes on roundabout, don't assign them
-    if (node_based_graph.GetEdgeData(via_edge).roundabout)
+    if (node_based_graph.GetEdgeData(via_edge).flags.roundabout)
         return TurnLaneScenario::NONE;
 
     // really don't touch roundabouts (#2626)
@@ -180,7 +180,9 @@ TurnLaneScenario TurnLaneHandler::deduceScenario(const NodeID at,
         (intersection.size() == 2 &&
          ((lane_description_id != INVALID_LANE_DESCRIPTIONID &&
            lane_description_id ==
-               node_based_graph.GetEdgeData(intersection[1].eid).lane_description_id) ||
+               node_data_container
+                   .GetAnnotation(node_based_graph.GetEdgeData(intersection[1].eid).annotation_data)
+                   .lane_description_id) &&
           angularDeviation(intersection[1].angle, STRAIGHT_ANGLE) < FUZZY_ANGLE_DIFFERENCE));
 
     if (is_going_straight_and_turns_continue)
@@ -280,7 +282,7 @@ TurnLaneScenario TurnLaneHandler::deduceScenario(const NodeID at,
     // FIXME the lane to add depends on the side of driving/u-turn rules in the country
     if (!lane_data.empty() && canMatchTrivially(intersection, lane_data) &&
         is_missing_valid_u_turn && !hasTag(TurnLaneType::none, lane_data))
-        lane_data.push_back({TurnLaneType::uturn, lane_data.back().to, lane_data.back().to, false});
+        lane_data.push_back({TurnLaneType::uturn, lane_data.back().to, lane_data.back().to});
 
     bool is_simple = isSimpleIntersection(lane_data, intersection);
 
@@ -368,7 +370,8 @@ void TurnLaneHandler::extractLaneData(const EdgeID via_edge,
                                       LaneDescriptionID &lane_description_id,
                                       LaneDataVector &lane_data) const
 {
-    const auto &edge_data = node_based_graph.GetEdgeData(via_edge);
+    const auto &edge_data =
+        node_data_container.GetAnnotation(node_based_graph.GetEdgeData(via_edge).annotation_data);
     lane_description_id = edge_data.lane_description_id;
     // create an empty lane data
     if (INVALID_LANE_DESCRIPTIONID != lane_description_id)
@@ -645,8 +648,6 @@ std::pair<LaneDataVector, LaneDataVector> TurnLaneHandler::partitionLaneData(
         if (lane == straightmost_tag_index)
         {
             augmentEntry(turn_lane_data[straightmost_tag_index]);
-            // disable this turn for assignment if it is a -use lane only
-            turn_lane_data[straightmost_tag_index].suppress_assignment = true;
         }
 
         if (matched_at_first[lane])
@@ -658,7 +659,7 @@ std::pair<LaneDataVector, LaneDataVector> TurnLaneHandler::partitionLaneData(
             std::count(matched_at_second.begin(), matched_at_second.end(), true)) ==
             getNumberOfTurns(next_intersection))
     {
-        TurnLaneData data = {TurnLaneType::straight, 255, 0, true};
+        TurnLaneData data = {TurnLaneType::straight, 255, 0};
         augmentEntry(data);
         first.push_back(data);
         std::sort(first.begin(), first.end());
@@ -722,9 +723,13 @@ Intersection TurnLaneHandler::handleSliproadTurn(Intersection intersection,
             return previous_intersection[sliproad_index + 1];
     }();
     const auto main_description_id =
-        node_based_graph.GetEdgeData(main_road.eid).lane_description_id;
+        node_data_container
+            .GetAnnotation(node_based_graph.GetEdgeData(main_road.eid).annotation_data)
+            .lane_description_id;
     const auto sliproad_description_id =
-        node_based_graph.GetEdgeData(sliproad.eid).lane_description_id;
+        node_data_container
+            .GetAnnotation(node_based_graph.GetEdgeData(sliproad.eid).annotation_data)
+            .lane_description_id;
 
     if (main_description_id == INVALID_LANE_DESCRIPTIONID ||
         sliproad_description_id == INVALID_LANE_DESCRIPTIONID)
@@ -781,19 +786,8 @@ Intersection TurnLaneHandler::handleSliproadTurn(Intersection intersection,
         }
     }
 
-    const auto combined_id = [&]() {
-        auto itr = lane_description_map.find(combined_description);
-        if (lane_description_map.find(combined_description) == lane_description_map.end())
-        {
-            const auto new_id = boost::numeric_cast<LaneDescriptionID>(lane_description_map.size());
-            lane_description_map[combined_description] = new_id;
-            return new_id;
-        }
-        else
-        {
-            return itr->second;
-        }
-    }();
+    const auto combined_id = lane_description_map.ConcurrentFindOrAdd(combined_description);
+
     return simpleMatchTuplesToTurns(std::move(intersection), lane_data, combined_id);
 }
 

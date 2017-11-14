@@ -3,13 +3,19 @@
 
 // Exposes all data access interfaces to the algorithms via base class ptr
 
+#include "engine/approach.hpp"
+#include "engine/phantom_node.hpp"
+
 #include "contractor/query_edge.hpp"
-#include "extractor/edge_based_node.hpp"
-#include "extractor/external_memory_node.hpp"
+
+#include "extractor/class_data.hpp"
+#include "extractor/edge_based_node_segment.hpp"
 #include "extractor/guidance/turn_instruction.hpp"
 #include "extractor/guidance/turn_lane_types.hpp"
 #include "extractor/original_edge_data.hpp"
-#include "engine/phantom_node.hpp"
+#include "extractor/query_node.hpp"
+#include "extractor/travel_mode.hpp"
+
 #include "util/exception.hpp"
 #include "util/guidance/bearing_class.hpp"
 #include "util/guidance/entry_class.hpp"
@@ -40,7 +46,7 @@ using StringView = util::StringView;
 class BaseDataFacade
 {
   public:
-    using RTreeLeaf = extractor::EdgeBasedNode;
+    using RTreeLeaf = extractor::EdgeBasedNodeSegment;
     BaseDataFacade() {}
     virtual ~BaseDataFacade() {}
 
@@ -51,7 +57,9 @@ class BaseDataFacade
 
     virtual OSMNodeID GetOSMNodeIDOfNode(const NodeID id) const = 0;
 
-    virtual GeometryID GetGeometryIndexForEdgeID(const EdgeID id) const = 0;
+    virtual GeometryID GetGeometryIndex(const NodeID id) const = 0;
+
+    virtual ComponentID GetComponentID(const NodeID id) const = 0;
 
     virtual std::vector<NodeID> GetUncompressedForwardGeometry(const EdgeID id) const = 0;
 
@@ -82,7 +90,13 @@ class BaseDataFacade
     virtual extractor::guidance::TurnInstruction
     GetTurnInstructionForEdgeID(const EdgeID id) const = 0;
 
-    virtual extractor::TravelMode GetTravelModeForEdgeID(const EdgeID id) const = 0;
+    virtual extractor::TravelMode GetTravelMode(const NodeID id) const = 0;
+
+    virtual extractor::ClassData GetClassData(const NodeID id) const = 0;
+
+    virtual bool ExcludeNode(const NodeID id) const = 0;
+
+    virtual std::vector<std::string> GetClasses(const extractor::ClassData class_data) const = 0;
 
     virtual std::vector<RTreeLeaf> GetEdgesInBox(const util::Coordinate south_west,
                                                  const util::Coordinate north_east) const = 0;
@@ -91,51 +105,61 @@ class BaseDataFacade
     NearestPhantomNodesInRange(const util::Coordinate input_coordinate,
                                const float max_distance,
                                const int bearing,
-                               const int bearing_range) const = 0;
+                               const int bearing_range,
+                               const Approach approach) const = 0;
     virtual std::vector<PhantomNodeWithDistance>
     NearestPhantomNodesInRange(const util::Coordinate input_coordinate,
-                               const float max_distance) const = 0;
+                               const float max_distance,
+                               const Approach approach) const = 0;
 
     virtual std::vector<PhantomNodeWithDistance>
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
                         const double max_distance,
                         const int bearing,
-                        const int bearing_range) const = 0;
+                        const int bearing_range,
+                        const Approach approach) const = 0;
     virtual std::vector<PhantomNodeWithDistance>
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
                         const int bearing,
-                        const int bearing_range) const = 0;
-    virtual std::vector<PhantomNodeWithDistance>
-    NearestPhantomNodes(const util::Coordinate input_coordinate,
-                        const unsigned max_results) const = 0;
+                        const int bearing_range,
+                        const Approach approach) const = 0;
     virtual std::vector<PhantomNodeWithDistance>
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
-                        const double max_distance) const = 0;
+                        const Approach approach) const = 0;
+    virtual std::vector<PhantomNodeWithDistance>
+    NearestPhantomNodes(const util::Coordinate input_coordinate,
+                        const unsigned max_results,
+                        const double max_distance,
+                        const Approach approach) const = 0;
 
-    virtual std::pair<PhantomNode, PhantomNode> NearestPhantomNodeWithAlternativeFromBigComponent(
-        const util::Coordinate input_coordinate) const = 0;
     virtual std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
-                                                      const double max_distance) const = 0;
+                                                      const Approach approach) const = 0;
+    virtual std::pair<PhantomNode, PhantomNode>
+    NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
+                                                      const double max_distance,
+                                                      const Approach approach) const = 0;
     virtual std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const double max_distance,
                                                       const int bearing,
-                                                      const int bearing_range) const = 0;
+                                                      const int bearing_range,
+                                                      const Approach approach) const = 0;
     virtual std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const int bearing,
-                                                      const int bearing_range) const = 0;
+                                                      const int bearing_range,
+                                                      const Approach approach) const = 0;
 
     virtual bool HasLaneData(const EdgeID id) const = 0;
     virtual util::guidance::LaneTupleIdPair GetLaneData(const EdgeID id) const = 0;
     virtual extractor::guidance::TurnLaneDescription
     GetTurnDescription(const LaneDescriptionID lane_description_id) const = 0;
 
-    virtual NameID GetNameIndexFromEdgeID(const EdgeID id) const = 0;
+    virtual NameID GetNameIndex(const NodeID id) const = 0;
 
     virtual StringView GetNameForID(const NameID id) const = 0;
 
@@ -144,6 +168,8 @@ class BaseDataFacade
     virtual StringView GetPronunciationForID(const NameID id) const = 0;
 
     virtual StringView GetDestinationsForID(const NameID id) const = 0;
+
+    virtual StringView GetExitsForID(const NameID id) const = 0;
 
     virtual std::string GetTimestamp() const = 0;
 
@@ -157,17 +183,14 @@ class BaseDataFacade
 
     virtual double GetWeightMultiplier() const = 0;
 
-    virtual BearingClassID GetBearingClassID(const NodeID id) const = 0;
-
     virtual util::guidance::TurnBearing PreTurnBearing(const EdgeID eid) const = 0;
     virtual util::guidance::TurnBearing PostTurnBearing(const EdgeID eid) const = 0;
 
-    virtual util::guidance::BearingClass
-    GetBearingClass(const BearingClassID bearing_class_id) const = 0;
+    virtual util::guidance::BearingClass GetBearingClass(const NodeID node) const = 0;
 
-    virtual EntryClassID GetEntryClassID(const EdgeID eid) const = 0;
+    virtual util::guidance::EntryClass GetEntryClass(const EdgeID turn_id) const = 0;
 
-    virtual util::guidance::EntryClass GetEntryClass(const EntryClassID entry_class_id) const = 0;
+    virtual bool IsLeftHandDriving(const NodeID id) const = 0;
 };
 }
 }

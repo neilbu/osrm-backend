@@ -21,16 +21,14 @@ namespace engine
 namespace plugins
 {
 
-ViaRoutePlugin::ViaRoutePlugin(int max_locations_viaroute)
-    : max_locations_viaroute(max_locations_viaroute)
+ViaRoutePlugin::ViaRoutePlugin(int max_locations_viaroute, int max_alternatives)
+    : max_locations_viaroute(max_locations_viaroute), max_alternatives(max_alternatives)
 {
 }
 
-Status
-ViaRoutePlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                              const RoutingAlgorithmsInterface &algorithms,
-                              const api::RouteParameters &route_parameters,
-                              util::json::Object &json_result) const
+Status ViaRoutePlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
+                                     const api::RouteParameters &route_parameters,
+                                     util::json::Object &json_result) const
 {
     BOOST_ASSERT(route_parameters.IsValid());
 
@@ -60,11 +58,25 @@ ViaRoutePlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFaca
                      json_result);
     }
 
+    // Takes care of alternatives=n and alternatives=true
+    if ((route_parameters.number_of_alternatives > static_cast<unsigned>(max_alternatives)) ||
+        (route_parameters.alternatives && max_alternatives == 0))
+    {
+        return Error("TooBig",
+                     "Requested number of alternatives is higher than current maximum (" +
+                         std::to_string(max_alternatives) + ")",
+                     json_result);
+    }
+
     if (!CheckAllCoordinates(route_parameters.coordinates))
     {
         return Error("InvalidValue", "Invalid coordinate value.", json_result);
     }
 
+    if (!CheckAlgorithms(route_parameters, algorithms, json_result))
+        return Status::Error;
+
+    const auto &facade = algorithms.GetFacade();
     auto phantom_node_pairs = GetPhantomNodes(facade, route_parameters);
     if (phantom_node_pairs.size() != route_parameters.coordinates.size())
     {
@@ -77,52 +89,50 @@ ViaRoutePlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFaca
 
     auto snapped_phantoms = SnapPhantomNodes(phantom_node_pairs);
 
-    const bool continue_straight_at_waypoint = route_parameters.continue_straight
-                                                   ? *route_parameters.continue_straight
-                                                   : facade.GetContinueStraightDefault();
-
     std::vector<PhantomNodes> start_end_nodes;
-    auto build_phantom_pairs = [&start_end_nodes, continue_straight_at_waypoint](
-        const PhantomNode &first_node, const PhantomNode &second_node) {
+    auto build_phantom_pairs = [&start_end_nodes](const PhantomNode &first_node,
+                                                  const PhantomNode &second_node) {
         start_end_nodes.push_back(PhantomNodes{first_node, second_node});
-        auto &last_inserted = start_end_nodes.back();
-        // enable forward direction if possible
-        if (last_inserted.source_phantom.forward_segment_id.id != SPECIAL_SEGMENTID)
-        {
-            last_inserted.source_phantom.forward_segment_id.enabled |=
-                !continue_straight_at_waypoint;
-        }
-        // enable reverse direction if possible
-        if (last_inserted.source_phantom.reverse_segment_id.id != SPECIAL_SEGMENTID)
-        {
-            last_inserted.source_phantom.reverse_segment_id.enabled |=
-                !continue_straight_at_waypoint;
-        }
     };
     util::for_each_pair(snapped_phantoms, build_phantom_pairs);
 
-    InternalRouteResult raw_route;
-    if (1 == start_end_nodes.size() && algorithms.HasAlternativePathSearch() &&
-        route_parameters.alternatives)
+    api::RouteAPI route_api{facade, route_parameters};
+
+    InternalManyRoutesResult routes;
+
+    // TODO: in v6 we should remove the boolean and only keep the number parameter.
+    // For now just force them to be in sync. and keep backwards compatibility.
+    const auto wants_alternatives =
+        (max_alternatives > 0) &&
+        (route_parameters.alternatives || route_parameters.number_of_alternatives > 0);
+    const auto number_of_alternatives = std::max(1u, route_parameters.number_of_alternatives);
+
+    // Alternatives do not support vias, only direct s,t queries supported
+    // See the implementation notes and high-level outline.
+    // https://github.com/Project-OSRM/osrm-backend/issues/3905
+    if (1 == start_end_nodes.size() && algorithms.HasAlternativePathSearch() && wants_alternatives)
     {
-        raw_route = algorithms.AlternativePathSearch(start_end_nodes.front());
+        routes = algorithms.AlternativePathSearch(start_end_nodes.front(), number_of_alternatives);
     }
     else if (1 == start_end_nodes.size() && algorithms.HasDirectShortestPathSearch())
     {
-        raw_route = algorithms.DirectShortestPathSearch(start_end_nodes.front());
+        routes = algorithms.DirectShortestPathSearch(start_end_nodes.front());
     }
     else
     {
-        raw_route =
-            algorithms.ShortestPathSearch(start_end_nodes, route_parameters.continue_straight);
+        routes = algorithms.ShortestPathSearch(start_end_nodes, route_parameters.continue_straight);
     }
+
+    // The post condition for all path searches is we have at least one route in our result.
+    // This route might be invalid by means of INVALID_EDGE_WEIGHT as shortest path weight.
+    BOOST_ASSERT(!routes.routes.empty());
 
     // we can only know this after the fact, different SCC ids still
     // allow for connection in one direction.
-    if (raw_route.is_valid())
+
+    if (routes.routes[0].is_valid())
     {
-        api::RouteAPI route_api{facade, route_parameters};
-        route_api.MakeResponse(raw_route, json_result);
+        route_api.MakeResponse(routes, json_result);
     }
     else
     {

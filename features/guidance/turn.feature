@@ -788,9 +788,9 @@ Feature: Simple Turns
             | bg    | primary | yes    |
 
         When I route I should get
-            | waypoints | route     | turns                          |
-            | a,d       | abc,bd,bd | depart,turn sharp right,arrive |
-            | a,f       | abc,bf,bf | depart,turn right,arrive       |
+            | waypoints | route     | turns                           |
+            | a,d       | abc,bd,bd | depart,turn right,arrive        |
+            | a,f       | abc,bf,bf | depart,turn slight right,arrive |
 
     Scenario: Right Turn Assignment Three Conflicting Turns with invalid - 3
         Given the node map
@@ -972,6 +972,8 @@ Feature: Simple Turns
                     d
 
                   h
+
+                  q
             """
 
         And the nodes
@@ -981,16 +983,16 @@ Feature: Simple Turns
         And the ways
             | nodes | name                           | highway     | oneway |
             | yf    | yf                             | trunk_link  | yes    |
-            | gfeh  | Centreville Road               | primary     |        |
+            | gfehq | Centreville Road               | primary     |        |
             | fi    | fi                             | trunk_link  | yes    |
             | ij    | Bloomingdale Road              | residential |        |
-            | jkabx | Blue Star Memorial Hwy         | trunk       |        |
+            | jkabx | Blue Star Memorial Hwy         | trunk       | yes    |
             | bcde  | bcde                           | trunk_link  | yes    |
             | kh    | kh                             | trunk_link  | yes    |
 
         When I route I should get
             | waypoints | turns                                        | route                                                         |
-            | a,h       | depart,off ramp right,turn sharp left,arrive | Blue Star Memorial Hwy,bcde,Centreville Road,Centreville Road |
+            | a,q       | depart,off ramp right,turn sharp left,arrive | Blue Star Memorial Hwy,bcde,Centreville Road,Centreville Road |
 
     @todo
     # https://www.openstreetmap.org/#map=20/52.51609/13.41080
@@ -1260,3 +1262,113 @@ Feature: Simple Turns
             | waypoints | route              | turns                       |
             | a,d       | Goethe,Fried,Fried | depart,continue left,arrive |
             | a,g       | Goethe,Fried,Fried | depart,turn right,arrive    |
+
+	# Conflicting roads (https://www.openstreetmap.org/export#map=19/37.57805/-77.46049)
+	Scenario: Turning at forklike structure
+        Given the node map
+            """
+            c  d
+               - - - b - - - a
+                   -
+              e
+            """
+        And the ways
+            | nodes | name | oneway | highway       |
+            | abc   | foo  | no     | residential   |
+            | bd    | bar  | yes    | residential   |
+            | eb    | some | yes    | tertiary_link |
+
+        When I route I should get
+            | waypoints | route       | turns                           |
+            | a,d       | foo,bar,bar | depart,turn slight right,arrive |
+
+    Scenario: UTurn onto ramp
+        Given the node map
+            """
+                       a - - - b - c
+                                  .|
+                _________________ de
+            h-g-----------------------f
+            """
+        And the ways
+            | nodes | name  | ref  | oneway | highway       |
+            | abc   | Road  |      | yes    | primary       |
+            | ce    | other |      | yes    | primary       |
+            | cdg   |       |      | yes    | motorway_link |
+            | fgh   |       | C 42 | yes    | motorway      |
+
+
+        When I route I should get
+            | waypoints | route   | ref         | turns                                         |
+            | a,h       | Road,,, | ,,C 42,C 42 | depart,on ramp right,merge slight left,arrive |
+
+    Scenario: UTurn onto ramp (same ref)
+        Given the node map
+            """
+                       a - - - b - c
+                                  .|
+                _________________ de
+            h-g-----------------------f
+            """
+        And the ways
+            | nodes | name  | ref  | oneway | highway       |
+            | abc   | Road  | C 42 | yes    | primary       |
+            | ce    | other |      | yes    | primary       |
+            | cdg   |       |      | yes    | motorway_link |
+            | fgh   |       | C 42 | yes    | motorway      |
+
+
+        When I route I should get
+            | waypoints | route           | ref             | turns                                         |
+            | a,h       | Road,,,         | C 42,,C 42,C 42 | depart,on ramp right,merge slight left,arrive |
+
+    Scenario: End of road, T-intersection, no obvious turn, only one road allowed
+        Given the node map
+            """
+                           d
+                          .
+            a . b  .  .  c
+                    '   .
+                      'e
+                      .
+                      f
+            """
+
+        And the ways
+            | nodes  | highway      | oneway | ref       |
+            | ab     | primary      |        | B 191     |
+            | bc     | primary      |        | B 191     |
+            | be     | primary_link | yes    |           |
+            | dc     | primary      |        | B 4;B 191 |
+            | ce     | primary      |        | B 4       |
+            | ef     | primary      |        | B 4       |
+
+        And the relations
+            | type        | way:from | way:to | node:via | restriction     |
+            | restriction | bc       | ce     | c        | no_right_turn   |
+            | restriction | be       | ef     | e        | only_right_turn |
+
+       When I route I should get
+            | waypoints | route    | turns                   |
+            | a,d       | ab,dc,dc | depart,turn left,arrive |
+
+
+    # https://www.openstreetmap.org/node/1332083066
+    Scenario: Turns ordering must respect initial bearings
+        Given the node map
+            """
+            a . be .
+                  \ c.
+                 d/    .f . g
+            """
+
+        And the ways
+            | nodes | highway | oneway |
+            | ab    | primary | yes    |
+            | bcd   | primary | yes    |
+            | befg  | primary | yes    |
+
+       When I route I should get
+            | waypoints | route        | turns                           |
+            | a,d       | ab,bcd,bcd   | depart,fork slight right,arrive |
+            | a,g       | ab,befg,befg | depart,fork slight left,arrive  |

@@ -86,7 +86,7 @@ InternalRouteResult TripPlugin::ComputeRoute(const RoutingAlgorithmsInterface &a
     }
 
     min_route = algorithms.ShortestPathSearch(min_route.segment_end_coordinates, {false});
-    BOOST_ASSERT_MSG(min_route.shortest_path_length < INVALID_EDGE_WEIGHT, "unroutable route");
+    BOOST_ASSERT_MSG(min_route.shortest_path_weight < INVALID_EDGE_WEIGHT, "unroutable route");
     return min_route;
 }
 
@@ -142,8 +142,7 @@ void ManipulateTableForFSE(const std::size_t source_id,
     //*********  End of changes to table  *************************************
 }
 
-Status TripPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                                 const RoutingAlgorithmsInterface &algorithms,
+Status TripPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                                  const api::TripParameters &parameters,
                                  util::json::Object &json_result) const
 {
@@ -192,6 +191,10 @@ Status TripPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataF
         return Error("InvalidValue", "Invalid coordinate value.", json_result);
     }
 
+    if (!CheckAlgorithms(parameters, algorithms, json_result))
+        return Status::Error;
+
+    const auto &facade = algorithms.GetFacade();
     auto phantom_node_pairs = GetPhantomNodes(facade, parameters);
     if (phantom_node_pairs.size() != number_of_locations)
     {

@@ -1,12 +1,14 @@
 #ifndef GEOMETRY_COMPRESSOR_HPP
 #define GEOMETRY_COMPRESSOR_HPP
 
+#include "extractor/scripting_environment.hpp"
 #include "util/typedefs.hpp"
 
 #include "util/node_based_graph.hpp"
 
 #include <memory>
 #include <unordered_set>
+#include <vector>
 
 namespace osrm
 {
@@ -14,7 +16,7 @@ namespace extractor
 {
 
 class CompressedEdgeContainer;
-class RestrictionMap;
+struct TurnRestriction;
 
 class GraphCompressor
 {
@@ -23,8 +25,11 @@ class GraphCompressor
   public:
     void Compress(const std::unordered_set<NodeID> &barrier_nodes,
                   const std::unordered_set<NodeID> &traffic_lights,
-                  RestrictionMap &restriction_map,
+                  ScriptingEnvironment &scripting_environment,
+                  std::vector<TurnRestriction> &turn_restrictions,
+                  std::vector<ConditionalTurnRestriction> &conditional_turn_restrictions,
                   util::NodeBasedDynamicGraph &graph,
+                  const std::vector<NodeBasedEdgeAnnotation> &node_data_container,
                   CompressedEdgeContainer &geometry_compressor);
 
   private:

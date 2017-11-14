@@ -17,7 +17,7 @@ namespace
 {
 
 // check bearings for u-turns.
-// since bearings are wrapped around at 0 (we only support 0,360), we need to do some minor math to
+// since bearings are wrapped around at 0 (we only support 0,360), we need to do some minor math to
 // check if bearings `a` and `b` go in opposite directions. In general we accept some minor
 // deviations for u-turns.
 bool bearingsAreReversed(const double bearing_in, const double bearing_out)
@@ -61,6 +61,22 @@ bool isShortAndUndisturbed(const RouteStep &step)
     return is_short && noIntermediaryIntersections(step);
 }
 
+// On dual carriageways, we might want to use u-turns in combination with new-name instructions.
+// Otherwise a u-turn should never be part of a collapsing instructions.
+bool noBadUTurnCombination(const RouteStepIterator first, const RouteStepIterator second)
+{
+    auto has_uturn = hasModifier(*first, DirectionModifier::UTurn) ||
+                     hasModifier(*second, DirectionModifier::UTurn);
+
+    auto const from_name_change_into_uturn =
+        hasTurnType(*first, TurnType::NewName) && hasModifier(*second, DirectionModifier::UTurn);
+
+    auto const uturn_into_name_change =
+        hasTurnType(*second, TurnType::NewName) && hasModifier(*first, DirectionModifier::UTurn);
+
+    return !has_uturn || from_name_change_into_uturn || uturn_into_name_change;
+}
+
 } // namespace
 
 bool basicCollapsePreconditions(const RouteStepIterator first, const RouteStepIterator second)
@@ -70,7 +86,10 @@ bool basicCollapsePreconditions(const RouteStepIterator first, const RouteStepIt
 
     const auto waypoint_type = hasWaypointType(*first) || hasWaypointType(*second);
 
-    return !has_roundabout_type && !waypoint_type && haveSameMode(*first, *second);
+    const auto contains_bad_uturn = !noBadUTurnCombination(first, second);
+
+    return !has_roundabout_type && !waypoint_type && haveSameMode(*first, *second) &&
+           !contains_bad_uturn;
 }
 
 bool basicCollapsePreconditions(const RouteStepIterator first,
@@ -81,8 +100,11 @@ bool basicCollapsePreconditions(const RouteStepIterator first,
                                      hasRoundaboutType(second->maneuver.instruction) ||
                                      hasRoundaboutType(third->maneuver.instruction);
 
+    const auto contains_bad_uturn =
+        !noBadUTurnCombination(first, second) && !noBadUTurnCombination(second, third);
+
     // require modes to match up
-    return !has_roundabout_type && haveSameMode(*first, *second, *third);
+    return !has_roundabout_type && haveSameMode(*first, *second, *third) && !contains_bad_uturn;
 }
 
 bool isStaggeredIntersection(const RouteStepIterator step_prior_to_intersection,
@@ -101,7 +123,7 @@ bool isStaggeredIntersection(const RouteStepIterator step_prior_to_intersection,
 
     const auto angle = [](const RouteStep &step) {
         const auto &intersection = step.intersections.front();
-        const auto entry_bearing = intersection.bearings[intersection.in];
+        const auto entry_bearing = util::bearing::reverse(intersection.bearings[intersection.in]);
         const auto exit_bearing = intersection.bearings[intersection.out];
         return util::bearing::angleBetween(entry_bearing, exit_bearing);
     };
@@ -145,6 +167,12 @@ bool isUTurn(const RouteStepIterator step_prior_to_intersection,
 {
     if (!basicCollapsePreconditions(
             step_prior_to_intersection, step_entering_intersection, step_leaving_intersection))
+        return false;
+
+    // uturns only allowed on turns
+    if (!hasTurnType(*step_entering_intersection, TurnType::Turn) &&
+        !hasTurnType(*step_entering_intersection, TurnType::Continue) &&
+        !hasTurnType(*step_entering_intersection, TurnType::EndOfRoad))
         return false;
 
     // the most basic condition for a uturn is that we actually turn around
@@ -278,7 +306,12 @@ bool suppressedStraightBetweenTurns(const RouteStepIterator step_entering_inters
          hasTurnType(*step_leaving_intersection, TurnType::Continue) ||
          hasTurnType(*step_leaving_intersection, TurnType::OnRamp));
 
-    return both_short_enough && similar_length && correct_types;
+    const auto total_angle =
+        totalTurnAngle(*step_entering_intersection, *step_leaving_intersection);
+    const auto total_angle_is_not_uturn =
+        (total_angle > NARROW_TURN_ANGLE) && (total_angle < 360 - NARROW_TURN_ANGLE);
+
+    return both_short_enough && similar_length && correct_types && total_angle_is_not_uturn;
 }
 
 bool maneuverSucceededByNameChange(const RouteStepIterator step_entering_intersection,

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef CONTRACTOR_OPTIONS_HPP
 #define CONTRACTOR_OPTIONS_HPP
 
+#include "storage/io_config.hpp"
 #include "updater/updater_config.hpp"
 
 #include <boost/filesystem/path.hpp>
@@ -39,35 +40,33 @@ namespace osrm
 namespace contractor
 {
 
-struct ContractorConfig
+struct ContractorConfig final : storage::IOConfig
 {
-    ContractorConfig() : requested_num_threads(0) {}
+    ContractorConfig()
+        : IOConfig({".osrm.ebg", ".osrm.ebg_nodes", ".osrm.properties"},
+                   {},
+                   {".osrm.hsgr", ".osrm.enw"}),
+          requested_num_threads(0)
+    {
+    }
 
     // Infer the output names from the path of the .osrm file
-    void UseDefaultOutputNames()
+    void UseDefaultOutputNames(const boost::filesystem::path &base)
     {
-        level_output_path = osrm_input_path.string() + ".level";
-        core_output_path = osrm_input_path.string() + ".core";
-        graph_output_path = osrm_input_path.string() + ".hsgr";
-        node_file_path = osrm_input_path.string() + ".enw";
-        updater_config.osrm_input_path = osrm_input_path;
-        updater_config.UseDefaultOutputNames();
+        IOConfig::UseDefaultOutputNames(base);
+        updater_config.UseDefaultOutputNames(base);
     }
+
+    bool IsValid() const { return IOConfig::IsValid() && updater_config.IsValid(); }
 
     updater::UpdaterConfig updater_config;
 
-    boost::filesystem::path osrm_input_path;
-
-    std::string level_output_path;
-    std::string core_output_path;
-    std::string graph_output_path;
-
-    std::string node_file_path;
-
+    // DEPRECATED to be removed in v6.0
     bool use_cached_priority;
 
     unsigned requested_num_threads;
 
+    // DEPRECATED to be removed in v6.0
     // A percentage of vertices that will be contracted for the hierarchy.
     // Offers a trade-off between preprocessing and query time.
     // The remaining vertices form the core of the hierarchy

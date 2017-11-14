@@ -3,10 +3,13 @@
 #include "extractor/edge_based_edge.hpp"
 #include "extractor/extraction_containers.hpp"
 #include "extractor/extraction_node.hpp"
+#include "extractor/extraction_relation.hpp"
 #include "extractor/extraction_way.hpp"
 #include "extractor/extractor_callbacks.hpp"
 #include "extractor/files.hpp"
+#include "extractor/node_based_graph_factory.hpp"
 #include "extractor/raster_source.hpp"
+#include "extractor/restriction_filter.hpp"
 #include "extractor/restriction_parser.hpp"
 #include "extractor/scripting_environment.hpp"
 
@@ -22,7 +25,8 @@
 #include "util/timing_util.hpp"
 
 #include "extractor/compressed_edge_container.hpp"
-#include "extractor/restriction_map.hpp"
+#include "extractor/restriction_index.hpp"
+#include "extractor/way_restriction_map.hpp"
 #include "util/static_graph.hpp"
 #include "util/static_rtree.hpp"
 
@@ -33,12 +37,17 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
+#include <boost/iterator/function_input_iterator.hpp>
 #include <boost/optional/optional.hpp>
 #include <boost/scope_exit.hpp>
 
+#include <osmium/handler/node_locations_for_ways.hpp>
+#include <osmium/index/map/flex_mem.hpp>
 #include <osmium/io/any_input.hpp>
+#include <osmium/thread/pool.hpp>
+#include <osmium/visitor.hpp>
 
-#include <tbb/concurrent_vector.h>
+#include <tbb/pipeline.h>
 #include <tbb/task_scheduler_init.h>
 
 #include <cstdlib>
@@ -51,7 +60,6 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
-#include <numeric> //partial_sum
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -65,33 +73,96 @@ namespace extractor
 
 namespace
 {
-std::tuple<std::vector<std::uint32_t>, std::vector<guidance::TurnLaneType::Mask>>
-transformTurnLaneMapIntoArrays(const guidance::LaneDescriptionMap &turn_lane_map)
+// Converts the class name map into a fixed mapping of index to name
+void SetClassNames(const std::vector<std::string> &class_names,
+                   ExtractorCallbacks::ClassesMap &classes_map,
+                   ProfileProperties &profile_properties)
 {
-    // could use some additional capacity? To avoid a copy during processing, though small data so
-    // probably not that important.
-    //
-    // From the map, we construct an adjacency array that allows access from all IDs to the list of
-    // associated Turn Lane Masks.
-    //
-    // turn lane offsets points into the locations of the turn_lane_masks array. We use a standard
-    // adjacency array like structure to store the turn lane masks.
-    std::vector<std::uint32_t> turn_lane_offsets(turn_lane_map.size() + 2); // empty ID + sentinel
-    for (auto entry = turn_lane_map.begin(); entry != turn_lane_map.end(); ++entry)
-        turn_lane_offsets[entry->second + 1] = entry->first.size();
+    // if we get a list of class names we can validate if we set invalid classes
+    // and add classes that were never reference
+    if (!class_names.empty())
+    {
+        // add class names that were never used explicitly on a way
+        // this makes sure we can correctly validate unkown class names later
+        for (const auto &name : class_names)
+        {
+            if (!isValidClassName(name))
+            {
+                throw util::exception("Invalid class name " + name + " only [a-Z0-9] allowed.");
+            }
 
-    // inplace prefix sum
-    std::partial_sum(turn_lane_offsets.begin(), turn_lane_offsets.end(), turn_lane_offsets.begin());
+            auto iter = classes_map.find(name);
+            if (iter == classes_map.end())
+            {
+                auto index = classes_map.size();
+                if (index > MAX_CLASS_INDEX)
+                {
+                    throw util::exception("Maximum number of classes if " +
+                                          std::to_string(MAX_CLASS_INDEX + 1));
+                }
 
-    // allocate the current masks
-    std::vector<guidance::TurnLaneType::Mask> turn_lane_masks(turn_lane_offsets.back());
-    for (auto entry = turn_lane_map.begin(); entry != turn_lane_map.end(); ++entry)
-        std::copy(entry->first.begin(),
-                  entry->first.end(),
-                  turn_lane_masks.begin() + turn_lane_offsets[entry->second]);
-    return std::make_tuple(std::move(turn_lane_offsets), std::move(turn_lane_masks));
+                classes_map[name] = getClassData(index);
+            }
+        }
+
+        // check if class names are only from the list supplied by the user
+        for (const auto &pair : classes_map)
+        {
+            auto iter = std::find(class_names.begin(), class_names.end(), pair.first);
+            if (iter == class_names.end())
+            {
+                throw util::exception("Profile used unknown class name: " + pair.first);
+            }
+        }
+    }
+
+    for (const auto &pair : classes_map)
+    {
+        auto range = getClassIndexes(pair.second);
+        BOOST_ASSERT(range.size() == 1);
+        profile_properties.SetClassName(range.front(), pair.first);
+    }
 }
-} // namespace
+
+// Converts the class name list to a mask list
+void SetExcludableClasses(const ExtractorCallbacks::ClassesMap &classes_map,
+                          const std::vector<std::vector<std::string>> &excludable_classes,
+                          ProfileProperties &profile_properties)
+{
+    if (excludable_classes.size() > MAX_EXCLUDABLE_CLASSES)
+    {
+        throw util::exception("Only " + std::to_string(MAX_EXCLUDABLE_CLASSES) +
+                              " excludable combinations allowed.");
+    }
+
+    // The exclude index 0 is reserve for not excludeing anything
+    profile_properties.SetExcludableClasses(0, 0);
+
+    std::size_t combination_index = 1;
+    for (const auto &combination : excludable_classes)
+    {
+        ClassData mask = 0;
+        for (const auto &name : combination)
+        {
+            auto iter = classes_map.find(name);
+            if (iter == classes_map.end())
+            {
+                util::Log(logWARNING)
+                    << "Unknown class name " + name + " in excludable combination. Ignoring.";
+            }
+            else
+            {
+                mask |= iter->second;
+            }
+        }
+
+        if (mask > 0)
+        {
+            profile_properties.SetExcludableClasses(combination_index++, mask);
+        }
+    }
+}
+}
 
 /**
  * TODO: Refactor this function into smaller functions for better readability.
@@ -115,381 +186,44 @@ transformTurnLaneMapIntoArrays(const guidance::LaneDescriptionMap &turn_lane_map
 int Extractor::run(ScriptingEnvironment &scripting_environment)
 {
     util::LogPolicy::GetInstance().Unmute();
-    TIMER_START(extracting);
 
     const unsigned recommended_num_threads = tbb::task_scheduler_init::default_num_threads();
     const auto number_of_threads = std::min(recommended_num_threads, config.requested_num_threads);
     tbb::task_scheduler_init init(number_of_threads ? number_of_threads
                                                     : tbb::task_scheduler_init::automatic);
 
-    {
-        util::Log() << "Input file: " << config.input_path.filename().string();
-        if (!config.profile_path.empty())
-        {
-            util::Log() << "Profile: " << config.profile_path.filename().string();
-        }
-        util::Log() << "Threads: " << number_of_threads;
-
-        const osmium::io::File input_file(config.input_path.string());
-
-        osmium::io::Reader reader(
-            input_file,
-            (config.use_metadata ? osmium::io::read_meta::yes : osmium::io::read_meta::no));
-
-        const osmium::io::Header header = reader.header();
-
-        unsigned number_of_nodes = 0;
-        unsigned number_of_ways = 0;
-        unsigned number_of_relations = 0;
-
-        util::Log() << "Parsing in progress..";
-        TIMER_START(parsing);
-
-        ExtractionContainers extraction_containers;
-        auto extractor_callbacks = std::make_unique<ExtractorCallbacks>(
-            extraction_containers, scripting_environment.GetProfileProperties());
-
-        // setup raster sources
-        scripting_environment.SetupSources();
-
-        std::string generator = header.get("generator");
-        if (generator.empty())
-        {
-            generator = "unknown tool";
-        }
-        util::Log() << "input file generated by " << generator;
-
-        // write .timestamp data file
-        std::string timestamp = header.get("osmosis_replication_timestamp");
-        if (timestamp.empty())
-        {
-            timestamp = "n/a";
-        }
-        util::Log() << "timestamp: " << timestamp;
-
-        storage::io::FileWriter timestamp_file(config.timestamp_file_name,
-                                               storage::io::FileWriter::GenerateFingerprint);
-
-        timestamp_file.WriteFrom(timestamp.c_str(), timestamp.length());
-
-        // initialize vectors holding parsed objects
-        tbb::concurrent_vector<std::pair<std::size_t, ExtractionNode>> resulting_nodes;
-        tbb::concurrent_vector<std::pair<std::size_t, ExtractionWay>> resulting_ways;
-        tbb::concurrent_vector<boost::optional<InputRestrictionContainer>> resulting_restrictions;
-
-        // setup restriction parser
-        const RestrictionParser restriction_parser(scripting_environment);
-
-        // create a vector of iterators into the buffer
-        for (std::vector<osmium::memory::Buffer::const_iterator> osm_elements;
-             const osmium::memory::Buffer buffer = reader.read();
-             osm_elements.clear())
-        {
-            for (auto iter = std::begin(buffer), end = std::end(buffer); iter != end; ++iter)
-            {
-                osm_elements.push_back(iter);
-            }
-
-            // clear resulting vectors
-            resulting_nodes.clear();
-            resulting_ways.clear();
-            resulting_restrictions.clear();
-
-            scripting_environment.ProcessElements(osm_elements,
-                                                  restriction_parser,
-                                                  resulting_nodes,
-                                                  resulting_ways,
-                                                  resulting_restrictions);
-
-            number_of_nodes += resulting_nodes.size();
-            // put parsed objects thru extractor callbacks
-            for (const auto &result : resulting_nodes)
-            {
-                extractor_callbacks->ProcessNode(
-                    static_cast<const osmium::Node &>(*(osm_elements[result.first])),
-                    result.second);
-            }
-            number_of_ways += resulting_ways.size();
-            for (const auto &result : resulting_ways)
-            {
-                extractor_callbacks->ProcessWay(
-                    static_cast<const osmium::Way &>(*(osm_elements[result.first])), result.second);
-            }
-            number_of_relations += resulting_restrictions.size();
-            for (const auto &result : resulting_restrictions)
-            {
-                extractor_callbacks->ProcessRestriction(result);
-            }
-        }
-        TIMER_STOP(parsing);
-        util::Log() << "Parsing finished after " << TIMER_SEC(parsing) << " seconds";
-
-        util::Log() << "Raw input contains " << number_of_nodes << " nodes, " << number_of_ways
-                    << " ways, and " << number_of_relations << " relations";
-
-        // take control over the turn lane map
-        turn_lane_map = extractor_callbacks->moveOutLaneDescriptionMap();
-
-        extractor_callbacks.reset();
-
-        if (extraction_containers.all_edges_list.empty())
-        {
-            throw util::exception(std::string("There are no edges remaining after parsing.") +
-                                  SOURCE_REF);
-        }
-
-        extraction_containers.PrepareData(scripting_environment,
-                                          config.output_file_name,
-                                          config.restriction_file_name,
-                                          config.names_file_name);
-
-        WriteProfileProperties(config.profile_properties_output_path,
-                               scripting_environment.GetProfileProperties());
-
-        TIMER_STOP(extracting);
-        util::Log() << "extraction finished after " << TIMER_SEC(extracting) << "s";
-    }
-
-    {
-        // Transform the node-based graph that OSM is based on into an edge-based graph
-        // that is better for routing.  Every edge becomes a node, and every valid
-        // movement (e.g. turn from A->B, and B->A) becomes an edge
-        util::Log() << "Generating edge-expanded graph representation";
-
-        TIMER_START(expansion);
-
-        std::vector<EdgeBasedNode> edge_based_node_list;
-        util::DeallocatingVector<EdgeBasedEdge> edge_based_edge_list;
-        std::vector<bool> node_is_startpoint;
-        std::vector<EdgeWeight> edge_based_node_weights;
-        std::vector<util::Coordinate> coordinates;
-        extractor::PackedOSMIDs osm_node_ids;
-
-        auto graph_size = BuildEdgeExpandedGraph(scripting_environment,
-                                                 coordinates,
-                                                 osm_node_ids,
-                                                 edge_based_node_list,
-                                                 node_is_startpoint,
-                                                 edge_based_node_weights,
-                                                 edge_based_edge_list,
-                                                 config.intersection_class_data_output_path);
-
-        auto number_of_node_based_nodes = graph_size.first;
-        auto max_edge_id = graph_size.second;
-
-        TIMER_STOP(expansion);
-
-        util::Log() << "Saving edge-based node weights to file.";
-        TIMER_START(timer_write_node_weights);
-        {
-            storage::io::FileWriter writer(config.edge_based_node_weights_output_path,
-                                           storage::io::FileWriter::GenerateFingerprint);
-            storage::serialization::write(writer, edge_based_node_weights);
-        }
-        TIMER_STOP(timer_write_node_weights);
-        util::Log() << "Done writing. (" << TIMER_SEC(timer_write_node_weights) << ")";
-
-        util::Log() << "Computing strictly connected components ...";
-        FindComponents(max_edge_id, edge_based_edge_list, edge_based_node_list);
-
-        util::Log() << "Building r-tree ...";
-        TIMER_START(rtree);
-        BuildRTree(std::move(edge_based_node_list), std::move(node_is_startpoint), coordinates);
-
-        TIMER_STOP(rtree);
-
-        util::Log() << "Writing node map ...";
-        files::writeNodes(config.node_output_path, coordinates, osm_node_ids);
-
-        WriteEdgeBasedGraph(config.edge_graph_output_path, max_edge_id, edge_based_edge_list);
-
-        const auto nodes_per_second =
-            static_cast<std::uint64_t>(number_of_node_based_nodes / TIMER_SEC(expansion));
-        const auto edges_per_second =
-            static_cast<std::uint64_t>((max_edge_id + 1) / TIMER_SEC(expansion));
-
-        util::Log() << "Expansion: " << nodes_per_second << " nodes/sec and " << edges_per_second
-                    << " edges/sec";
-        util::Log() << "To prepare the data for routing, run: "
-                    << "./osrm-contract " << config.output_file_name;
-    }
-
-    return 0;
-}
-
-void Extractor::WriteProfileProperties(const std::string &output_path,
-                                       const ProfileProperties &properties) const
-{
-    storage::io::FileWriter file(output_path, storage::io::FileWriter::GenerateFingerprint);
-
-    file.WriteOne(properties);
-}
-
-void Extractor::FindComponents(unsigned max_edge_id,
-                               const util::DeallocatingVector<EdgeBasedEdge> &input_edge_list,
-                               std::vector<EdgeBasedNode> &input_nodes) const
-{
-    using InputEdge = util::static_graph_details::SortableEdgeWithData<void>;
-    using UncontractedGraph = util::StaticGraph<void>;
-    std::vector<InputEdge> edges;
-    edges.reserve(input_edge_list.size() * 2);
-
-    for (const auto &edge : input_edge_list)
-    {
-        BOOST_ASSERT_MSG(static_cast<unsigned int>(std::max(edge.data.weight, 1)) > 0,
-                         "edge distance < 1");
-        BOOST_ASSERT(edge.source <= max_edge_id);
-        BOOST_ASSERT(edge.target <= max_edge_id);
-        if (edge.data.forward)
-        {
-            edges.push_back({edge.source, edge.target});
-        }
-
-        if (edge.data.backward)
-        {
-            edges.push_back({edge.target, edge.source});
-        }
-    }
-
-    // connect forward and backward nodes of each edge
-    for (const auto &node : input_nodes)
-    {
-        if (node.reverse_segment_id.enabled)
-        {
-            BOOST_ASSERT(node.forward_segment_id.id <= max_edge_id);
-            BOOST_ASSERT(node.reverse_segment_id.id <= max_edge_id);
-            edges.push_back({node.forward_segment_id.id, node.reverse_segment_id.id});
-            edges.push_back({node.reverse_segment_id.id, node.forward_segment_id.id});
-        }
-    }
-
-    tbb::parallel_sort(edges.begin(), edges.end());
-    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
-
-    auto uncontracted_graph = UncontractedGraph(max_edge_id + 1, edges);
-
-    TarjanSCC<UncontractedGraph> component_search(uncontracted_graph);
-    component_search.Run();
-
-    for (auto &node : input_nodes)
-    {
-        auto forward_component = component_search.GetComponentID(node.forward_segment_id.id);
-        BOOST_ASSERT(!node.reverse_segment_id.enabled ||
-                     forward_component ==
-                         component_search.GetComponentID(node.reverse_segment_id.id));
-
-        const unsigned component_size = component_search.GetComponentSize(forward_component);
-        node.component.is_tiny = component_size < config.small_component_size;
-        node.component.id = 1 + forward_component;
-    }
-}
-
-/**
-  \brief Build load restrictions from .restriction file
-  */
-std::shared_ptr<RestrictionMap> Extractor::LoadRestrictionMap()
-{
-    storage::io::FileReader file_reader(config.restriction_file_name,
-                                        storage::io::FileReader::VerifyFingerprint);
-    std::vector<TurnRestriction> restriction_list;
-
-    util::loadRestrictionsFromFile(file_reader, restriction_list);
-
-    util::Log() << " - " << restriction_list.size() << " restrictions.";
-
-    return std::make_shared<RestrictionMap>(restriction_list);
-}
-
-/**
-  \brief Load node based graph from .osrm file
-  */
-std::shared_ptr<util::NodeBasedDynamicGraph>
-Extractor::LoadNodeBasedGraph(std::unordered_set<NodeID> &barriers,
-                              std::unordered_set<NodeID> &traffic_signals,
-                              std::vector<util::Coordinate> &coordiantes,
-                              extractor::PackedOSMIDs &osm_node_ids)
-{
-    storage::io::FileReader file_reader(config.output_file_name,
-                                        storage::io::FileReader::VerifyFingerprint);
-
-    auto barriers_iter = inserter(barriers, end(barriers));
-    auto traffic_signals_iter = inserter(traffic_signals, end(traffic_signals));
-
-    NodeID number_of_node_based_nodes = util::loadNodesFromFile(
-        file_reader, barriers_iter, traffic_signals_iter, coordiantes, osm_node_ids);
-
-    util::Log() << " - " << barriers.size() << " bollard nodes, " << traffic_signals.size()
-                << " traffic lights";
-
-    std::vector<NodeBasedEdge> edge_list;
-    util::loadEdgesFromFile(file_reader, edge_list);
-
-    if (edge_list.empty())
-    {
-        throw util::exception("Node-based-graph (" + config.output_file_name +
-                              ") contains no edges." + SOURCE_REF);
-    }
-
-    return util::NodeBasedDynamicGraphFromEdges(number_of_node_based_nodes, edge_list);
-}
-
-/**
- \brief Building an edge-expanded graph from node-based input and turn restrictions
-*/
-std::pair<std::size_t, EdgeID>
-Extractor::BuildEdgeExpandedGraph(ScriptingEnvironment &scripting_environment,
-                                  std::vector<util::Coordinate> &coordinates,
-                                  extractor::PackedOSMIDs &osm_node_ids,
-                                  std::vector<EdgeBasedNode> &node_based_edge_list,
-                                  std::vector<bool> &node_is_startpoint,
-                                  std::vector<EdgeWeight> &edge_based_node_weights,
-                                  util::DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list,
-                                  const std::string &intersection_class_output_file)
-{
-    std::unordered_set<NodeID> barrier_nodes;
-    std::unordered_set<NodeID> traffic_lights;
-
-    auto restriction_map = LoadRestrictionMap();
-    auto node_based_graph =
-        LoadNodeBasedGraph(barrier_nodes, traffic_lights, coordinates, osm_node_ids);
-
-    CompressedEdgeContainer compressed_edge_container;
-    GraphCompressor graph_compressor;
-    graph_compressor.Compress(barrier_nodes,
-                              traffic_lights,
-                              *restriction_map,
-                              *node_based_graph,
-                              compressed_edge_container);
-
-    util::NameTable name_table(config.names_file_name);
-
-    // could use some additional capacity? To avoid a copy during processing, though small data so
-    // probably not that important.
-    std::vector<std::uint32_t> turn_lane_offsets;
-    std::vector<guidance::TurnLaneType::Mask> turn_lane_masks;
-    std::tie(turn_lane_offsets, turn_lane_masks) = transformTurnLaneMapIntoArrays(turn_lane_map);
-
-    EdgeBasedGraphFactory edge_based_graph_factory(
-        node_based_graph,
-        compressed_edge_container,
-        barrier_nodes,
-        traffic_lights,
-        std::const_pointer_cast<RestrictionMap const>(restriction_map),
-        coordinates,
-        osm_node_ids,
-        scripting_environment.GetProfileProperties(),
-        name_table,
-        turn_lane_offsets,
-        turn_lane_masks,
-        turn_lane_map);
-
-    edge_based_graph_factory.Run(scripting_environment,
-                                 config.edge_output_path,
-                                 config.turn_lane_data_file_name,
-                                 config.turn_weight_penalties_path,
-                                 config.turn_duration_penalties_path,
-                                 config.turn_penalties_index_path,
-                                 config.cnbg_ebg_graph_mapping_output_path);
+    guidance::LaneDescriptionMap turn_lane_map;
+    std::vector<TurnRestriction> turn_restrictions;
+    std::vector<ConditionalTurnRestriction> conditional_turn_restrictions;
+    std::tie(turn_lane_map, turn_restrictions, conditional_turn_restrictions) =
+        ParseOSMData(scripting_environment, number_of_threads);
+
+    // Transform the node-based graph that OSM is based on into an edge-based graph
+    // that is better for routing.  Every edge becomes a node, and every valid
+    // movement (e.g. turn from A->B, and B->A) becomes an edge
+    util::Log() << "Generating edge-expanded graph representation";
+
+    TIMER_START(expansion);
+
+    EdgeBasedNodeDataContainer edge_based_nodes_container;
+    std::vector<EdgeBasedNodeSegment> edge_based_node_segments;
+    util::DeallocatingVector<EdgeBasedEdge> edge_based_edge_list;
+    std::vector<bool> node_is_startpoint;
+    std::vector<EdgeWeight> edge_based_node_weights;
+
+    // Create a node-based graph from the OSRM file
+    NodeBasedGraphFactory node_based_graph_factory(config.GetPath(".osrm"),
+                                                   scripting_environment,
+                                                   turn_restrictions,
+                                                   conditional_turn_restrictions);
+
+    util::Log() << "Writing nodes for nodes-based and edges-based graphs ...";
+    auto const &coordinates = node_based_graph_factory.GetCoordinates();
+    files::writeNodes(
+        config.GetPath(".osrm.nbg_nodes"), coordinates, node_based_graph_factory.GetOsmNodes());
+    node_based_graph_factory.ReleaseOsmNodes();
+
+    auto const &node_based_graph = node_based_graph_factory.GetGraph();
 
     // The osrm-partition tool requires the compressed node based graph with an embedding.
     //
@@ -510,27 +244,498 @@ Extractor::BuildEdgeExpandedGraph(ScriptingEnvironment &scripting_environment,
 
     compressed_node_based_graph_writing = std::async(std::launch::async, [&] {
         WriteCompressedNodeBasedGraph(
-            config.compressed_node_based_graph_output_path, *node_based_graph, coordinates);
+            config.GetPath(".osrm.cnbg").string(), node_based_graph, coordinates);
     });
 
-    WriteTurnLaneData(config.turn_lane_descriptions_file_name);
-    files::writeSegmentData(config.geometry_output_path,
-                            *compressed_edge_container.ToSegmentData());
+    node_based_graph_factory.GetCompressedEdges().PrintStatistics();
+
+    const auto &barrier_nodes = node_based_graph_factory.GetBarriers();
+    const auto &traffic_signals = node_based_graph_factory.GetTrafficSignals();
+    // stealing the annotation data from the node-based graph
+    edge_based_nodes_container =
+        EdgeBasedNodeDataContainer({}, std::move(node_based_graph_factory.GetAnnotationData()));
+
+    conditional_turn_restrictions =
+        removeInvalidRestrictions(std::move(conditional_turn_restrictions), node_based_graph);
+
+    const auto number_of_node_based_nodes = node_based_graph.GetNumberOfNodes();
+
+    const auto number_of_edge_based_nodes =
+        BuildEdgeExpandedGraph(node_based_graph,
+                               coordinates,
+                               node_based_graph_factory.GetCompressedEdges(),
+                               barrier_nodes,
+                               traffic_signals,
+                               turn_restrictions,
+                               conditional_turn_restrictions,
+                               turn_lane_map,
+                               scripting_environment,
+                               edge_based_nodes_container,
+                               edge_based_node_segments,
+                               node_is_startpoint,
+                               edge_based_node_weights,
+                               edge_based_edge_list,
+                               config.GetPath(".osrm.icd").string());
+
+    TIMER_STOP(expansion);
+
+    // output the geometry of the node-based graph, needs to be done after the last usage, since it
+    // destroys internal containers
+    files::writeSegmentData(config.GetPath(".osrm.geometry"),
+                            *node_based_graph_factory.GetCompressedEdges().ToSegmentData());
+
+    util::Log() << "Saving edge-based node weights to file.";
+    TIMER_START(timer_write_node_weights);
+    {
+        storage::io::FileWriter writer(config.GetPath(".osrm.enw"),
+                                       storage::io::FileWriter::GenerateFingerprint);
+        storage::serialization::write(writer, edge_based_node_weights);
+    }
+    TIMER_STOP(timer_write_node_weights);
+    util::Log() << "Done writing. (" << TIMER_SEC(timer_write_node_weights) << ")";
+
+    util::Log() << "Computing strictly connected components ...";
+    FindComponents(number_of_edge_based_nodes,
+                   edge_based_edge_list,
+                   edge_based_node_segments,
+                   edge_based_nodes_container);
+
+    util::Log() << "Building r-tree ...";
+    TIMER_START(rtree);
+    BuildRTree(std::move(edge_based_node_segments), std::move(node_is_startpoint), coordinates);
+
+    TIMER_STOP(rtree);
+
+    files::writeNodeData(config.GetPath(".osrm.ebg_nodes"), edge_based_nodes_container);
+
+    util::Log() << "Writing edge-based-graph edges       ... " << std::flush;
+    TIMER_START(write_edges);
+    files::writeEdgeBasedGraph(
+        config.GetPath(".osrm.ebg"), number_of_edge_based_nodes, edge_based_edge_list);
+    TIMER_STOP(write_edges);
+    util::Log() << "ok, after " << TIMER_SEC(write_edges) << "s";
+
+    util::Log() << "Processed " << edge_based_edge_list.size() << " edges";
+
+    const auto nodes_per_second =
+        static_cast<std::uint64_t>(number_of_node_based_nodes / TIMER_SEC(expansion));
+    const auto edges_per_second =
+        static_cast<std::uint64_t>((number_of_edge_based_nodes) / TIMER_SEC(expansion));
+
+    util::Log() << "Expansion: " << nodes_per_second << " nodes/sec and " << edges_per_second
+                << " edges/sec";
+    util::Log() << "To prepare the data for routing, run: "
+                << "./osrm-contract " << config.GetPath(".osrm");
+
+    return 0;
+}
+
+std::tuple<guidance::LaneDescriptionMap,
+           std::vector<TurnRestriction>,
+           std::vector<ConditionalTurnRestriction>>
+Extractor::ParseOSMData(ScriptingEnvironment &scripting_environment,
+                        const unsigned number_of_threads)
+{
+    TIMER_START(extracting);
+
+    util::Log() << "Input file: " << config.input_path.filename().string();
+    if (!config.profile_path.empty())
+    {
+        util::Log() << "Profile: " << config.profile_path.filename().string();
+    }
+    util::Log() << "Threads: " << number_of_threads;
+
+    const osmium::io::File input_file(config.input_path.string());
+    osmium::thread::Pool pool(number_of_threads);
+
+    util::Log() << "Parsing in progress..";
+    TIMER_START(parsing);
+
+    { // Parse OSM header
+        osmium::io::Reader reader(input_file, osmium::osm_entity_bits::nothing);
+        osmium::io::Header header = reader.header();
+
+        std::string generator = header.get("generator");
+        if (generator.empty())
+        {
+            generator = "unknown tool";
+        }
+        util::Log() << "input file generated by " << generator;
+
+        // write .timestamp data file
+        std::string timestamp = header.get("osmosis_replication_timestamp");
+        if (timestamp.empty())
+        {
+            timestamp = "n/a";
+        }
+        util::Log() << "timestamp: " << timestamp;
+
+        storage::io::FileWriter timestamp_file(config.GetPath(".osrm.timestamp"),
+                                               storage::io::FileWriter::GenerateFingerprint);
+
+        timestamp_file.WriteFrom(timestamp.c_str(), timestamp.length());
+    }
+
+    // Extraction containers and restriction parser
+    ExtractionContainers extraction_containers;
+    ExtractorCallbacks::ClassesMap classes_map;
+    guidance::LaneDescriptionMap turn_lane_map;
+    auto extractor_callbacks =
+        std::make_unique<ExtractorCallbacks>(extraction_containers,
+                                             classes_map,
+                                             turn_lane_map,
+                                             scripting_environment.GetProfileProperties());
+
+    // get list of supported relation types
+    auto relation_types = scripting_environment.GetRelations();
+    std::sort(relation_types.begin(), relation_types.end());
+
+    std::vector<std::string> restrictions = scripting_environment.GetRestrictions();
+    // setup restriction parser
+    const RestrictionParser restriction_parser(
+        scripting_environment.GetProfileProperties().use_turn_restrictions,
+        config.parse_conditionals,
+        restrictions);
+
+    // OSM data reader
+    using SharedBuffer = std::shared_ptr<osmium::memory::Buffer>;
+    struct ParsedBuffer
+    {
+        SharedBuffer buffer;
+        std::vector<std::pair<const osmium::Node &, ExtractionNode>> resulting_nodes;
+        std::vector<std::pair<const osmium::Way &, ExtractionWay>> resulting_ways;
+        std::vector<std::pair<const osmium::Relation &, ExtractionRelation>> resulting_relations;
+        std::vector<InputConditionalTurnRestriction> resulting_restrictions;
+    };
+
+    ExtractionRelationContainer relations;
+
+    const auto buffer_reader = [](osmium::io::Reader &reader) {
+        return tbb::filter_t<void, SharedBuffer>(
+            tbb::filter::serial_in_order, [&reader](tbb::flow_control &fc) {
+                if (auto buffer = reader.read())
+                {
+                    return std::make_shared<osmium::memory::Buffer>(std::move(buffer));
+                }
+                else
+                {
+                    fc.stop();
+                    return SharedBuffer{};
+                }
+            });
+    };
+
+    // Node locations cache (assumes nodes are placed before ways)
+    using osmium_index_type =
+        osmium::index::map::FlexMem<osmium::unsigned_object_id_type, osmium::Location>;
+    using osmium_location_handler_type = osmium::handler::NodeLocationsForWays<osmium_index_type>;
+
+    osmium_index_type location_cache;
+    osmium_location_handler_type location_handler(location_cache);
+
+    tbb::filter_t<SharedBuffer, SharedBuffer> location_cacher(
+        tbb::filter::serial_in_order, [&location_handler](SharedBuffer buffer) {
+            osmium::apply(buffer->begin(), buffer->end(), location_handler);
+            return buffer;
+        });
+
+    // OSM elements Lua parser
+    tbb::filter_t<SharedBuffer, ParsedBuffer> buffer_transformer(
+        tbb::filter::parallel, [&](const SharedBuffer buffer) {
+
+            ParsedBuffer parsed_buffer;
+            parsed_buffer.buffer = buffer;
+            scripting_environment.ProcessElements(*buffer,
+                                                  restriction_parser,
+                                                  relations,
+                                                  parsed_buffer.resulting_nodes,
+                                                  parsed_buffer.resulting_ways,
+                                                  parsed_buffer.resulting_restrictions);
+            return parsed_buffer;
+        });
+
+    // Parsed nodes and ways handler
+    unsigned number_of_nodes = 0;
+    unsigned number_of_ways = 0;
+    unsigned number_of_restrictions = 0;
+    tbb::filter_t<ParsedBuffer, void> buffer_storage(
+        tbb::filter::serial_in_order, [&](const ParsedBuffer &parsed_buffer) {
+
+            number_of_nodes += parsed_buffer.resulting_nodes.size();
+            // put parsed objects thru extractor callbacks
+            for (const auto &result : parsed_buffer.resulting_nodes)
+            {
+                extractor_callbacks->ProcessNode(result.first, result.second);
+            }
+            number_of_ways += parsed_buffer.resulting_ways.size();
+            for (const auto &result : parsed_buffer.resulting_ways)
+            {
+                extractor_callbacks->ProcessWay(result.first, result.second);
+            }
+
+            number_of_restrictions += parsed_buffer.resulting_restrictions.size();
+            for (const auto &result : parsed_buffer.resulting_restrictions)
+            {
+                extractor_callbacks->ProcessRestriction(result);
+            }
+        });
+
+    tbb::filter_t<SharedBuffer, std::shared_ptr<ExtractionRelationContainer>> buffer_relation_cache(
+        tbb::filter::parallel, [&](const SharedBuffer buffer) {
+            if (!buffer)
+                return std::shared_ptr<ExtractionRelationContainer>{};
+
+            auto relations = std::make_shared<ExtractionRelationContainer>();
+            for (auto entity = buffer->cbegin(), end = buffer->cend(); entity != end; ++entity)
+            {
+                if (entity->type() != osmium::item_type::relation)
+                    continue;
+
+                const auto &rel = static_cast<const osmium::Relation &>(*entity);
+
+                const char *rel_type = rel.get_value_by_key("type");
+                if (!rel_type ||
+                    !std::binary_search(
+                        relation_types.begin(), relation_types.end(), std::string(rel_type)))
+                    continue;
+
+                ExtractionRelation extracted_rel({rel.id(), osmium::item_type::relation});
+                for (auto const &t : rel.tags())
+                    extracted_rel.attributes.emplace_back(std::make_pair(t.key(), t.value()));
+
+                for (auto const &m : rel.members())
+                {
+                    ExtractionRelation::OsmIDTyped const mid(m.ref(), m.type());
+                    extracted_rel.AddMember(mid, m.role());
+                    relations->AddRelationMember(extracted_rel.id, mid);
+                }
+
+                relations->AddRelation(std::move(extracted_rel));
+            };
+            return relations;
+        });
+
+    unsigned number_of_relations = 0;
+    tbb::filter_t<std::shared_ptr<ExtractionRelationContainer>, void> buffer_storage_relation(
+        tbb::filter::serial_in_order,
+        [&](const std::shared_ptr<ExtractionRelationContainer> parsed_relations) {
+
+            number_of_relations += parsed_relations->GetRelationsNum();
+            relations.Merge(std::move(*parsed_relations));
+        });
+
+    // Parse OSM elements with parallel transformer
+    // Number of pipeline tokens that yielded the best speedup was about 1.5 * num_cores
+    const auto num_threads = tbb::task_scheduler_init::default_num_threads() * 1.5;
+    const auto read_meta =
+        config.use_metadata ? osmium::io::read_meta::yes : osmium::io::read_meta::no;
+
+    { // Relations reading pipeline
+        util::Log() << "Parse relations ...";
+        osmium::io::Reader reader(input_file, osmium::osm_entity_bits::relation, read_meta);
+        tbb::parallel_pipeline(
+            num_threads, buffer_reader(reader) & buffer_relation_cache & buffer_storage_relation);
+    }
+
+    { // Nodes and ways reading pipeline
+        util::Log() << "Parse ways and nodes ...";
+        osmium::io::Reader reader(input_file,
+                                  osmium::osm_entity_bits::node | osmium::osm_entity_bits::way |
+                                      osmium::osm_entity_bits::relation,
+                                  read_meta);
+
+        const auto pipeline =
+            scripting_environment.HasLocationDependentData() && config.use_locations_cache
+                ? buffer_reader(reader) & location_cacher & buffer_transformer & buffer_storage
+                : buffer_reader(reader) & buffer_transformer & buffer_storage;
+        tbb::parallel_pipeline(num_threads, pipeline);
+    }
+
+    TIMER_STOP(parsing);
+    util::Log() << "Parsing finished after " << TIMER_SEC(parsing) << " seconds";
+
+    util::Log() << "Raw input contains " << number_of_nodes << " nodes, " << number_of_ways
+                << " ways, and " << number_of_relations << " relations, " << number_of_restrictions
+                << " restrictions";
+
+    extractor_callbacks.reset();
+
+    if (extraction_containers.all_edges_list.empty())
+    {
+        throw util::exception(std::string("There are no edges remaining after parsing.") +
+                              SOURCE_REF);
+    }
+
+    extraction_containers.PrepareData(scripting_environment,
+                                      config.GetPath(".osrm").string(),
+                                      config.GetPath(".osrm.names").string());
+
+    auto profile_properties = scripting_environment.GetProfileProperties();
+    SetClassNames(scripting_environment.GetClassNames(), classes_map, profile_properties);
+    auto excludable_classes = scripting_environment.GetExcludableClasses();
+    SetExcludableClasses(classes_map, excludable_classes, profile_properties);
+    files::writeProfileProperties(config.GetPath(".osrm.properties").string(), profile_properties);
+
+    TIMER_STOP(extracting);
+    util::Log() << "extraction finished after " << TIMER_SEC(extracting) << "s";
+
+    return std::make_tuple(std::move(turn_lane_map),
+                           std::move(extraction_containers.unconditional_turn_restrictions),
+                           std::move(extraction_containers.conditional_turn_restrictions));
+}
+
+void Extractor::FindComponents(unsigned number_of_edge_based_nodes,
+                               const util::DeallocatingVector<EdgeBasedEdge> &input_edge_list,
+                               const std::vector<EdgeBasedNodeSegment> &input_node_segments,
+                               EdgeBasedNodeDataContainer &nodes_container) const
+{
+    using InputEdge = util::static_graph_details::SortableEdgeWithData<void>;
+    using UncontractedGraph = util::StaticGraph<void>;
+    std::vector<InputEdge> edges;
+    edges.reserve(input_edge_list.size() * 2);
+
+    for (const auto &edge : input_edge_list)
+    {
+        BOOST_ASSERT_MSG(static_cast<unsigned int>(std::max(edge.data.weight, 1)) > 0,
+                         "edge distance < 1");
+        BOOST_ASSERT(edge.source < number_of_edge_based_nodes);
+        BOOST_ASSERT(edge.target < number_of_edge_based_nodes);
+        if (edge.data.forward)
+        {
+            edges.push_back({edge.source, edge.target});
+        }
+
+        if (edge.data.backward)
+        {
+            edges.push_back({edge.target, edge.source});
+        }
+    }
+
+    // Connect forward and backward nodes of each edge to enforce
+    // forward and backward edge-based nodes be in one strongly-connected component
+    for (const auto &segment : input_node_segments)
+    {
+        if (segment.reverse_segment_id.enabled)
+        {
+            BOOST_ASSERT(segment.forward_segment_id.id < number_of_edge_based_nodes);
+            BOOST_ASSERT(segment.reverse_segment_id.id < number_of_edge_based_nodes);
+            edges.push_back({segment.forward_segment_id.id, segment.reverse_segment_id.id});
+            edges.push_back({segment.reverse_segment_id.id, segment.forward_segment_id.id});
+        }
+    }
+
+    tbb::parallel_sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+
+    auto uncontracted_graph = UncontractedGraph(number_of_edge_based_nodes, edges);
+
+    TarjanSCC<UncontractedGraph> component_search(uncontracted_graph);
+    component_search.Run();
+
+    for (NodeID node_id = 0; node_id < number_of_edge_based_nodes; ++node_id)
+    {
+        const auto forward_component = component_search.GetComponentID(node_id);
+        const auto component_size = component_search.GetComponentSize(forward_component);
+        const auto is_tiny = component_size < config.small_component_size;
+        BOOST_ASSERT(node_id < nodes_container.NumberOfNodes());
+        nodes_container.nodes[node_id].component_id = {1 + forward_component, is_tiny};
+    }
+}
+
+/**
+ \brief Building an edge-expanded graph from node-based input and turn restrictions
+*/
+
+EdgeID Extractor::BuildEdgeExpandedGraph(
+    // input data
+    const util::NodeBasedDynamicGraph &node_based_graph,
+    const std::vector<util::Coordinate> &coordinates,
+    const CompressedEdgeContainer &compressed_edge_container,
+    const std::unordered_set<NodeID> &barrier_nodes,
+    const std::unordered_set<NodeID> &traffic_signals,
+    const std::vector<TurnRestriction> &turn_restrictions,
+    const std::vector<ConditionalTurnRestriction> &conditional_turn_restrictions,
+    // might have to be updated to add new lane combinations
+    guidance::LaneDescriptionMap &turn_lane_map,
+    // for calculating turn penalties
+    ScriptingEnvironment &scripting_environment,
+    // output data
+    EdgeBasedNodeDataContainer &edge_based_nodes_container,
+    std::vector<EdgeBasedNodeSegment> &edge_based_node_segments,
+    std::vector<bool> &node_is_startpoint,
+    std::vector<EdgeWeight> &edge_based_node_weights,
+    util::DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list,
+    const std::string &intersection_class_output_file)
+{
+    util::NameTable name_table(config.GetPath(".osrm.names").string());
+
+    EdgeBasedGraphFactory edge_based_graph_factory(node_based_graph,
+                                                   edge_based_nodes_container,
+                                                   compressed_edge_container,
+                                                   barrier_nodes,
+                                                   traffic_signals,
+                                                   coordinates,
+                                                   name_table,
+                                                   turn_lane_map);
+
+    const auto create_edge_based_edges = [&]() {
+        // scoped to relase intermediate datastructures right after the call
+        std::vector<TurnRestriction> node_restrictions;
+        for (auto const &t : turn_restrictions)
+            if (t.Type() == RestrictionType::NODE_RESTRICTION)
+                node_restrictions.push_back(t);
+
+        std::vector<ConditionalTurnRestriction> conditional_node_restrictions;
+        for (auto const &t : conditional_turn_restrictions)
+            if (t.Type() == RestrictionType::NODE_RESTRICTION)
+                conditional_node_restrictions.push_back(t);
+
+        RestrictionMap via_node_restriction_map(node_restrictions, IndexNodeByFromAndVia());
+        WayRestrictionMap via_way_restriction_map(conditional_turn_restrictions);
+        ConditionalRestrictionMap conditional_node_restriction_map(conditional_node_restrictions,
+                                                                   IndexNodeByFromAndVia());
+
+        edge_based_graph_factory.Run(scripting_environment,
+                                     config.GetPath(".osrm.edges").string(),
+                                     config.GetPath(".osrm.tld").string(),
+                                     config.GetPath(".osrm.turn_weight_penalties").string(),
+                                     config.GetPath(".osrm.turn_duration_penalties").string(),
+                                     config.GetPath(".osrm.turn_penalties_index").string(),
+                                     config.GetPath(".osrm.cnbg_to_ebg").string(),
+                                     config.GetPath(".osrm.restrictions").string(),
+                                     via_node_restriction_map,
+                                     conditional_node_restriction_map,
+                                     via_way_restriction_map);
+        return edge_based_graph_factory.GetNumberOfEdgeBasedNodes();
+    };
+
+    const auto number_of_edge_based_nodes = create_edge_based_edges();
+
+    {
+        std::vector<std::uint32_t> turn_lane_offsets;
+        std::vector<guidance::TurnLaneType::Mask> turn_lane_masks;
+        std::tie(turn_lane_offsets, turn_lane_masks) =
+            guidance::transformTurnLaneMapIntoArrays(turn_lane_map);
+        files::writeTurnLaneDescriptions(
+            config.GetPath(".osrm.tls"), turn_lane_offsets, turn_lane_masks);
+    }
 
     edge_based_graph_factory.GetEdgeBasedEdges(edge_based_edge_list);
-    edge_based_graph_factory.GetEdgeBasedNodes(node_based_edge_list);
+    edge_based_graph_factory.GetEdgeBasedNodeSegments(edge_based_node_segments);
     edge_based_graph_factory.GetStartPointMarkers(node_is_startpoint);
     edge_based_graph_factory.GetEdgeBasedNodeWeights(edge_based_node_weights);
-    auto max_edge_id = edge_based_graph_factory.GetHighestEdgeID();
 
-    const std::size_t number_of_node_based_nodes = node_based_graph->GetNumberOfNodes();
+    util::Log() << "Writing Intersection Classification Data";
+    TIMER_START(write_intersections);
+    files::writeIntersections(
+        intersection_class_output_file,
+        IntersectionBearingsContainer{edge_based_graph_factory.GetBearingClassIds(),
+                                      edge_based_graph_factory.GetBearingClasses()},
+        edge_based_graph_factory.GetEntryClasses());
+    TIMER_STOP(write_intersections);
+    util::Log() << "ok, after " << TIMER_SEC(write_intersections) << "s";
 
-    WriteIntersectionClassificationData(intersection_class_output_file,
-                                        edge_based_graph_factory.GetBearingClassIds(),
-                                        edge_based_graph_factory.GetBearingClasses(),
-                                        edge_based_graph_factory.GetEntryClasses());
-
-    return std::make_pair(number_of_node_based_nodes, max_edge_id);
+    return number_of_edge_based_nodes;
 }
 
 /**
@@ -538,21 +743,21 @@ Extractor::BuildEdgeExpandedGraph(ScriptingEnvironment &scripting_environment,
 
     Saves tree into '.ramIndex' and leaves into '.fileIndex'.
  */
-void Extractor::BuildRTree(std::vector<EdgeBasedNode> node_based_edge_list,
+void Extractor::BuildRTree(std::vector<EdgeBasedNodeSegment> edge_based_node_segments,
                            std::vector<bool> node_is_startpoint,
                            const std::vector<util::Coordinate> &coordinates)
 {
-    util::Log() << "constructing r-tree of " << node_based_edge_list.size()
-                << " edge elements build on-top of " << coordinates.size() << " coordinates";
+    util::Log() << "Constructing r-tree of " << edge_based_node_segments.size()
+                << " segments build on-top of " << coordinates.size() << " coordinates";
 
-    BOOST_ASSERT(node_is_startpoint.size() == node_based_edge_list.size());
+    BOOST_ASSERT(node_is_startpoint.size() == edge_based_node_segments.size());
 
     // Filter node based edges based on startpoint
-    auto out_iter = node_based_edge_list.begin();
-    auto in_iter = node_based_edge_list.begin();
+    auto out_iter = edge_based_node_segments.begin();
+    auto in_iter = edge_based_node_segments.begin();
     for (auto index : util::irange<std::size_t>(0UL, node_is_startpoint.size()))
     {
-        BOOST_ASSERT(in_iter != node_based_edge_list.end());
+        BOOST_ASSERT(in_iter != edge_based_node_segments.end());
         if (node_is_startpoint[index])
         {
             *out_iter = *in_iter;
@@ -560,108 +765,23 @@ void Extractor::BuildRTree(std::vector<EdgeBasedNode> node_based_edge_list,
         }
         in_iter++;
     }
-    auto new_size = out_iter - node_based_edge_list.begin();
+    auto new_size = out_iter - edge_based_node_segments.begin();
     if (new_size == 0)
     {
         throw util::exception("There are no snappable edges left after processing.  Are you "
                               "setting travel modes correctly in the profile?  Cannot continue." +
                               SOURCE_REF);
     }
-    node_based_edge_list.resize(new_size);
+    edge_based_node_segments.resize(new_size);
 
     TIMER_START(construction);
-    util::StaticRTree<EdgeBasedNode> rtree(node_based_edge_list,
-                                           config.rtree_nodes_output_path,
-                                           config.rtree_leafs_output_path,
-                                           coordinates);
+    util::StaticRTree<EdgeBasedNodeSegment> rtree(edge_based_node_segments,
+                                                  config.GetPath(".osrm.ramIndex").string(),
+                                                  config.GetPath(".osrm.fileIndex").string(),
+                                                  coordinates);
 
     TIMER_STOP(construction);
     util::Log() << "finished r-tree construction in " << TIMER_SEC(construction) << " seconds";
-}
-
-void Extractor::WriteEdgeBasedGraph(
-    std::string const &output_file_filename,
-    EdgeID const max_edge_id,
-    util::DeallocatingVector<EdgeBasedEdge> const &edge_based_edge_list)
-{
-    storage::io::FileWriter file(output_file_filename,
-                                 storage::io::FileWriter::GenerateFingerprint);
-
-    util::Log() << "Writing edge-based-graph edges       ... " << std::flush;
-    TIMER_START(write_edges);
-
-    std::uint64_t number_of_used_edges = edge_based_edge_list.size();
-    file.WriteElementCount64(number_of_used_edges);
-    file.WriteOne(max_edge_id);
-
-    for (const auto &edge : edge_based_edge_list)
-    {
-        file.WriteOne(edge);
-    }
-
-    TIMER_STOP(write_edges);
-    util::Log() << "ok, after " << TIMER_SEC(write_edges) << "s";
-
-    util::Log() << "Processed " << number_of_used_edges << " edges";
-}
-
-void Extractor::WriteIntersectionClassificationData(
-    const std::string &output_file_name,
-    const std::vector<BearingClassID> &node_based_intersection_classes,
-    const std::vector<util::guidance::BearingClass> &bearing_classes,
-    const std::vector<util::guidance::EntryClass> &entry_classes) const
-{
-    storage::io::FileWriter writer(output_file_name, storage::io::FileWriter::GenerateFingerprint);
-
-    util::Log() << "Writing Intersection Classification Data";
-    TIMER_START(write_edges);
-    storage::serialization::write(writer, node_based_intersection_classes);
-
-    // create range table for vectors:
-    std::vector<unsigned> bearing_counts;
-    bearing_counts.reserve(bearing_classes.size());
-    std::uint64_t total_bearings = 0;
-    for (const auto &bearing_class : bearing_classes)
-    {
-        bearing_counts.push_back(
-            static_cast<unsigned>(bearing_class.getAvailableBearings().size()));
-        total_bearings += bearing_class.getAvailableBearings().size();
-    }
-
-    util::RangeTable<> bearing_class_range_table(bearing_counts);
-    bearing_class_range_table.Write(writer);
-
-    writer.WriteOne(total_bearings);
-
-    for (const auto &bearing_class : bearing_classes)
-    {
-        const auto &bearings = bearing_class.getAvailableBearings();
-        writer.WriteFrom(bearings.data(), bearings.size());
-    }
-
-    storage::serialization::write(writer, entry_classes);
-
-    TIMER_STOP(write_edges);
-    util::Log() << "ok, after " << TIMER_SEC(write_edges) << "s for "
-                << node_based_intersection_classes.size() << " Indices into "
-                << bearing_classes.size() << " bearing classes and " << entry_classes.size()
-                << " entry classes and " << total_bearings << " bearing values.";
-}
-
-void Extractor::WriteTurnLaneData(const std::string &turn_lane_file) const
-{
-    // Write the turn lane data to file
-    std::vector<std::uint32_t> turn_lane_offsets;
-    std::vector<guidance::TurnLaneType::Mask> turn_lane_masks;
-    std::tie(turn_lane_offsets, turn_lane_masks) = transformTurnLaneMapIntoArrays(turn_lane_map);
-
-    util::Log() << "Writing turn lane masks...";
-    TIMER_START(turn_lane_timer);
-
-    files::writeTurnLaneDescriptions(turn_lane_file, turn_lane_offsets, turn_lane_masks);
-
-    TIMER_STOP(turn_lane_timer);
-    util::Log() << "done (" << TIMER_SEC(turn_lane_timer) << ")";
 }
 
 void Extractor::WriteCompressedNodeBasedGraph(const std::string &path,

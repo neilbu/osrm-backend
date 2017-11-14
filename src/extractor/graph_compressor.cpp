@@ -1,28 +1,66 @@
 #include "extractor/graph_compressor.hpp"
 
 #include "extractor/compressed_edge_container.hpp"
-#include "extractor/restriction_map.hpp"
+#include "extractor/extraction_turn.hpp"
+#include "extractor/guidance/intersection.hpp"
+#include "extractor/restriction.hpp"
+#include "extractor/restriction_compressor.hpp"
+
 #include "util/dynamic_graph.hpp"
 #include "util/node_based_graph.hpp"
 #include "util/percent.hpp"
 
 #include "util/log.hpp"
 
+#include <boost/assert.hpp>
+#include <unordered_set>
+
 namespace osrm
 {
 namespace extractor
 {
 
-void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
-                               const std::unordered_set<NodeID> &traffic_lights,
-                               RestrictionMap &restriction_map,
-                               util::NodeBasedDynamicGraph &graph,
-                               CompressedEdgeContainer &geometry_compressor)
+void GraphCompressor::Compress(
+    const std::unordered_set<NodeID> &barrier_nodes,
+    const std::unordered_set<NodeID> &traffic_signals,
+    ScriptingEnvironment &scripting_environment,
+    std::vector<TurnRestriction> &turn_restrictions,
+    std::vector<ConditionalTurnRestriction> &conditional_turn_restrictions,
+    util::NodeBasedDynamicGraph &graph,
+    const std::vector<NodeBasedEdgeAnnotation> &node_data_container,
+    CompressedEdgeContainer &geometry_compressor)
 {
     const unsigned original_number_of_nodes = graph.GetNumberOfNodes();
     const unsigned original_number_of_edges = graph.GetNumberOfEdges();
 
+    RestrictionCompressor restriction_compressor(turn_restrictions, conditional_turn_restrictions);
+
+    // we do not compress turn restrictions on degree two nodes. These nodes are usually used to
+    // indicated `directed` barriers
+    std::unordered_set<NodeID> restriction_via_nodes;
+
+    const auto remember_via_nodes = [&](const auto &restriction) {
+        if (restriction.Type() == RestrictionType::NODE_RESTRICTION)
+        {
+            const auto &node = restriction.AsNodeRestriction();
+            restriction_via_nodes.insert(node.via);
+        }
+        else
+        {
+            BOOST_ASSERT(restriction.Type() == RestrictionType::WAY_RESTRICTION);
+            const auto &way = restriction.AsWayRestriction();
+            restriction_via_nodes.insert(way.in_restriction.via);
+            restriction_via_nodes.insert(way.out_restriction.via);
+        }
+    };
+    std::for_each(turn_restrictions.begin(), turn_restrictions.end(), remember_via_nodes);
+    std::for_each(conditional_turn_restrictions.begin(),
+                  conditional_turn_restrictions.end(),
+                  remember_via_nodes);
+
     {
+        const auto weight_multiplier =
+            scripting_environment.GetProfileProperties().GetWeightMultiplier();
         util::UnbufferedLog log;
         util::Percent progress(log, original_number_of_nodes);
 
@@ -43,7 +81,7 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
             }
 
             // check if v is a via node for a turn restriction, i.e. a 'directed' barrier node
-            if (restriction_map.IsViaNode(node_v))
+            if (restriction_via_nodes.count(node_v))
             {
                 continue;
             }
@@ -67,6 +105,7 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
             BOOST_ASSERT(forward_e2 >= graph.BeginEdges(node_v) &&
                          forward_e2 < graph.EndEdges(node_v));
             const EdgeID reverse_e2 = graph.BeginEdges(node_v) + 1 - reverse_edge_order;
+
             BOOST_ASSERT(SPECIAL_EDGEID != reverse_e2);
             BOOST_ASSERT(reverse_e2 >= graph.BeginEdges(node_v) &&
                          reverse_e2 < graph.EndEdges(node_v));
@@ -90,6 +129,10 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
 
             const EdgeData &fwd_edge_data1 = graph.GetEdgeData(forward_e1);
             const EdgeData &rev_edge_data1 = graph.GetEdgeData(reverse_e1);
+            const auto fwd_annotation_data1 = node_data_container[fwd_edge_data1.annotation_data];
+            const auto fwd_annotation_data2 = node_data_container[fwd_edge_data2.annotation_data];
+            const auto rev_annotation_data1 = node_data_container[rev_edge_data1.annotation_data];
+            const auto rev_annotation_data2 = node_data_container[rev_edge_data2.annotation_data];
 
             if (graph.FindEdgeInEitherDirection(node_u, node_w) != SPECIAL_EDGEID)
             {
@@ -97,57 +140,22 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
             }
 
             // this case can happen if two ways with different names overlap
-            if (fwd_edge_data1.name_id != rev_edge_data1.name_id ||
-                fwd_edge_data2.name_id != rev_edge_data2.name_id)
+            if ((fwd_annotation_data1.name_id != rev_annotation_data1.name_id) ||
+                (fwd_annotation_data2.name_id != rev_annotation_data2.name_id))
             {
                 continue;
             }
 
-            if (fwd_edge_data1.CanCombineWith(fwd_edge_data2) &&
-                rev_edge_data1.CanCombineWith(rev_edge_data2))
+            if ((fwd_edge_data1.flags == fwd_edge_data2.flags) &&
+                (rev_edge_data1.flags == rev_edge_data2.flags) &&
+                (fwd_edge_data1.reversed == fwd_edge_data2.reversed) &&
+                (rev_edge_data1.reversed == rev_edge_data2.reversed) &&
+                // annotations need to match, except for the lane-id which can differ
+                fwd_annotation_data1.CanCombineWith(fwd_annotation_data2) &&
+                rev_annotation_data1.CanCombineWith(rev_annotation_data2))
             {
-                BOOST_ASSERT(graph.GetEdgeData(forward_e1).name_id ==
-                             graph.GetEdgeData(reverse_e1).name_id);
-                BOOST_ASSERT(graph.GetEdgeData(forward_e2).name_id ==
-                             graph.GetEdgeData(reverse_e2).name_id);
-
-                // Do not compress edge if it crosses a traffic signal.
-                // This can't be done in CanCombineWith, becase we only store the
-                // traffic signals in the `traffic_lights` list, which EdgeData
-                // doesn't have access to.
-                const bool has_node_penalty = traffic_lights.find(node_v) != traffic_lights.end();
-                if (has_node_penalty)
-                    continue;
-
-                // Get weights before graph is modified
-                const auto forward_weight1 = fwd_edge_data1.weight;
-                const auto forward_weight2 = fwd_edge_data2.weight;
-                const auto forward_duration1 = fwd_edge_data1.duration;
-                const auto forward_duration2 = fwd_edge_data2.duration;
-
-                BOOST_ASSERT(0 != forward_weight1);
-                BOOST_ASSERT(0 != forward_weight2);
-
-                const auto reverse_weight1 = rev_edge_data1.weight;
-                const auto reverse_weight2 = rev_edge_data2.weight;
-                const auto reverse_duration1 = rev_edge_data1.duration;
-                const auto reverse_duration2 = rev_edge_data2.duration;
-
-                BOOST_ASSERT(0 != reverse_weight1);
-                BOOST_ASSERT(0 != reverse_weight2);
-
-                // add weight of e2's to e1
-                graph.GetEdgeData(forward_e1).weight += forward_weight2;
-                graph.GetEdgeData(reverse_e1).weight += reverse_weight2;
-
-                // add duration of e2's to e1
-                graph.GetEdgeData(forward_e1).duration += forward_duration2;
-                graph.GetEdgeData(reverse_e1).duration += reverse_duration2;
-
-                // extend e1's to targets of e2's
-                graph.SetTarget(forward_e1, node_w);
-                graph.SetTarget(reverse_e1, node_u);
-
+                BOOST_ASSERT(!(graph.GetEdgeData(forward_e1).reversed &&
+                               graph.GetEdgeData(reverse_e1).reversed));
                 /*
                  * Remember Lane Data for compressed parts. This handles scenarios where lane-data
                  * is
@@ -175,33 +183,102 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
                  * just
                  * like a barrier.
                  */
-                const auto selectLaneID = [](const LaneDescriptionID front,
-                                             const LaneDescriptionID back) {
+                const auto selectAnnotation = [&node_data_container](
+                    const AnnotationID front_annotation, const AnnotationID back_annotation) {
                     // A lane has tags: u - (front) - v - (back) - w
                     // During contraction, we keep only one of the tags. Usually the one closer to
-                    // the
-                    // intersection is preferred. If its empty, however, we keep the non-empty one
-                    if (back == INVALID_LANE_DESCRIPTIONID)
-                        return front;
-                    return back;
+                    // the intersection is preferred. If its empty, however, we keep the non-empty
+                    // one
+                    if (node_data_container[back_annotation].lane_description_id ==
+                        INVALID_LANE_DESCRIPTIONID)
+                        return front_annotation;
+                    return back_annotation;
                 };
-                graph.GetEdgeData(forward_e1).lane_description_id =
-                    selectLaneID(graph.GetEdgeData(forward_e1).lane_description_id,
-                                 fwd_edge_data2.lane_description_id);
-                graph.GetEdgeData(reverse_e1).lane_description_id =
-                    selectLaneID(graph.GetEdgeData(reverse_e1).lane_description_id,
-                                 rev_edge_data2.lane_description_id);
+
+                graph.GetEdgeData(forward_e1).annotation_data = selectAnnotation(
+                    fwd_edge_data1.annotation_data, fwd_edge_data2.annotation_data);
+                graph.GetEdgeData(reverse_e1).annotation_data = selectAnnotation(
+                    rev_edge_data1.annotation_data, rev_edge_data2.annotation_data);
+                graph.GetEdgeData(forward_e2).annotation_data = selectAnnotation(
+                    fwd_edge_data2.annotation_data, fwd_edge_data1.annotation_data);
+                graph.GetEdgeData(reverse_e2).annotation_data = selectAnnotation(
+                    rev_edge_data2.annotation_data, rev_edge_data1.annotation_data);
+
+                /*
+                // Do not compress edge if it crosses a traffic signal.
+                // This can't be done in CanCombineWith, becase we only store the
+                // traffic signals in the `traffic signal` list, which EdgeData
+                // doesn't have access to.
+                */
+                const bool has_node_penalty = traffic_signals.find(node_v) != traffic_signals.end();
+                boost::optional<EdgeDuration> node_duration_penalty = boost::none;
+                boost::optional<EdgeWeight> node_weight_penalty = boost::none;
+                if (has_node_penalty)
+                {
+                    // we cannot handle this as node penalty, if it depends on turn direction
+                    if (fwd_edge_data1.flags.restricted != fwd_edge_data2.flags.restricted)
+                        continue;
+
+                    // generate an artifical turn for the turn penalty generation
+                    ExtractionTurn extraction_turn(
+                        0,
+                        2,
+                        false,
+                        true,
+                        fwd_edge_data1.flags.restricted,
+                        fwd_edge_data2.flags.restricted,
+                        node_data_container[fwd_edge_data1.annotation_data].is_left_hand_driving,
+                        TRAVEL_MODE_DRIVING,
+                        TRAVEL_MODE_DRIVING);
+
+                    scripting_environment.ProcessTurn(extraction_turn);
+                    node_duration_penalty = extraction_turn.duration * 10;
+                    node_weight_penalty = extraction_turn.weight * weight_multiplier;
+                }
+
+                // Get weights before graph is modified
+                const auto forward_weight1 = fwd_edge_data1.weight;
+                const auto forward_weight2 = fwd_edge_data2.weight;
+                const auto forward_duration1 = fwd_edge_data1.duration;
+                const auto forward_duration2 = fwd_edge_data2.duration;
+
+                BOOST_ASSERT(0 != forward_weight1);
+                BOOST_ASSERT(0 != forward_weight2);
+
+                const auto reverse_weight1 = rev_edge_data1.weight;
+                const auto reverse_weight2 = rev_edge_data2.weight;
+                const auto reverse_duration1 = rev_edge_data1.duration;
+                const auto reverse_duration2 = rev_edge_data2.duration;
+
+                BOOST_ASSERT(0 != reverse_weight1);
+                BOOST_ASSERT(0 != reverse_weight2);
+
+                // add weight of e2's to e1
+                graph.GetEdgeData(forward_e1).weight += forward_weight2;
+                graph.GetEdgeData(reverse_e1).weight += reverse_weight2;
+
+                // add duration of e2's to e1
+                graph.GetEdgeData(forward_e1).duration += forward_duration2;
+                graph.GetEdgeData(reverse_e1).duration += reverse_duration2;
+
+                if (node_weight_penalty && node_duration_penalty)
+                {
+                    graph.GetEdgeData(forward_e1).weight += *node_weight_penalty;
+                    graph.GetEdgeData(reverse_e1).weight += *node_weight_penalty;
+                    graph.GetEdgeData(forward_e1).duration += *node_duration_penalty;
+                    graph.GetEdgeData(reverse_e1).duration += *node_duration_penalty;
+                }
+
+                // extend e1's to targets of e2's
+                graph.SetTarget(forward_e1, node_w);
+                graph.SetTarget(reverse_e1, node_u);
 
                 // remove e2's (if bidir, otherwise only one)
                 graph.DeleteEdge(node_v, forward_e2);
                 graph.DeleteEdge(node_v, reverse_e2);
 
                 // update any involved turn restrictions
-                restriction_map.FixupStartingTurnRestriction(node_u, node_v, node_w);
-                restriction_map.FixupArrivingTurnRestriction(node_u, node_v, node_w, graph);
-
-                restriction_map.FixupStartingTurnRestriction(node_w, node_v, node_u);
-                restriction_map.FixupArrivingTurnRestriction(node_w, node_v, node_u, graph);
+                restriction_compressor.Compress(node_u, node_v, node_w);
 
                 // store compressed geometry in container
                 geometry_compressor.CompressEdge(forward_e1,
@@ -211,7 +288,9 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
                                                  forward_weight1,
                                                  forward_weight2,
                                                  forward_duration1,
-                                                 forward_duration2);
+                                                 forward_duration2,
+                                                 node_weight_penalty,
+                                                 node_duration_penalty);
                 geometry_compressor.CompressEdge(reverse_e1,
                                                  reverse_e2,
                                                  node_v,
@@ -219,7 +298,9 @@ void GraphCompressor::Compress(const std::unordered_set<NodeID> &barrier_nodes,
                                                  reverse_weight1,
                                                  reverse_weight2,
                                                  reverse_duration1,
-                                                 reverse_duration2);
+                                                 reverse_duration2,
+                                                 node_weight_penalty,
+                                                 node_duration_penalty);
             }
         }
     }

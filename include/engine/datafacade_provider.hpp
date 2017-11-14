@@ -2,54 +2,78 @@
 #define OSRM_ENGINE_DATAFACADE_PROVIDER_HPP
 
 #include "engine/data_watchdog.hpp"
+#include "engine/datafacade.hpp"
 #include "engine/datafacade/contiguous_internalmem_datafacade.hpp"
 #include "engine/datafacade/process_memory_allocator.hpp"
+#include "engine/datafacade_factory.hpp"
 
 namespace osrm
 {
 namespace engine
 {
-
-template <typename AlgorithmT> class DataFacadeProvider
+namespace detail
 {
-    using FacadeT = datafacade::ContiguousInternalMemoryDataFacade<AlgorithmT>;
 
+template <typename AlgorithmT, template <typename A> class FacadeT> class DataFacadeProvider
+{
   public:
+    using Facade = FacadeT<AlgorithmT>;
+
     virtual ~DataFacadeProvider() = default;
 
-    virtual std::shared_ptr<const FacadeT> Get() const = 0;
+    virtual std::shared_ptr<const Facade> Get(const api::BaseParameters &) const = 0;
+    virtual std::shared_ptr<const Facade> Get(const api::TileParameters &) const = 0;
 };
 
-template <typename AlgorithmT> class ImmutableProvider final : public DataFacadeProvider<AlgorithmT>
+template <typename AlgorithmT, template <typename A> class FacadeT>
+class ImmutableProvider final : public DataFacadeProvider<AlgorithmT, FacadeT>
 {
-    using FacadeT = datafacade::ContiguousInternalMemoryDataFacade<AlgorithmT>;
-
   public:
+    using Facade = typename DataFacadeProvider<AlgorithmT, FacadeT>::Facade;
+
     ImmutableProvider(const storage::StorageConfig &config)
-        : immutable_data_facade(std::make_shared<FacadeT>(
-              std::make_shared<datafacade::ProcessMemoryAllocator>(config)))
+        : facade_factory(std::make_shared<datafacade::ProcessMemoryAllocator>(config))
     {
     }
 
-    std::shared_ptr<const FacadeT> Get() const override final { return immutable_data_facade; }
+    std::shared_ptr<const Facade> Get(const api::TileParameters &params) const override final
+    {
+        return facade_factory.Get(params);
+    }
+    std::shared_ptr<const Facade> Get(const api::BaseParameters &params) const override final
+    {
+        return facade_factory.Get(params);
+    }
 
   private:
-    std::shared_ptr<const FacadeT> immutable_data_facade;
+    DataFacadeFactory<FacadeT, AlgorithmT> facade_factory;
 };
 
-template <typename AlgorithmT> class WatchingProvider final : public DataFacadeProvider<AlgorithmT>
+template <typename AlgorithmT, template <typename A> class FacadeT>
+class WatchingProvider : public DataFacadeProvider<AlgorithmT, FacadeT>
 {
-    using FacadeT = datafacade::ContiguousInternalMemoryDataFacade<AlgorithmT>;
-    DataWatchdog<AlgorithmT> watchdog;
+    DataWatchdog<AlgorithmT, FacadeT> watchdog;
 
   public:
-    std::shared_ptr<const FacadeT> Get() const override final
+    using Facade = typename DataFacadeProvider<AlgorithmT, FacadeT>::Facade;
+
+    std::shared_ptr<const Facade> Get(const api::TileParameters &params) const override final
     {
-        // We need a singleton here because multiple instances of DataWatchdog
-        // conflict on shared memory mappings
-        return watchdog.Get();
+        return watchdog.Get(params);
+    }
+    std::shared_ptr<const Facade> Get(const api::BaseParameters &params) const override final
+    {
+        return watchdog.Get(params);
     }
 };
+}
+
+template <typename AlgorithmT>
+using DataFacadeProvider = detail::DataFacadeProvider<AlgorithmT, DataFacade>;
+template <typename AlgorithmT>
+using WatchingProvider = detail::WatchingProvider<AlgorithmT, DataFacade>;
+template <typename AlgorithmT>
+using ImmutableProvider = detail::ImmutableProvider<AlgorithmT, DataFacade>;
 }
 }
 

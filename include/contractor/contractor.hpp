@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -29,16 +29,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define CONTRACTOR_CONTRACTOR_HPP
 
 #include "contractor/contractor_config.hpp"
-#include "contractor/query_edge.hpp"
-#include "extractor/edge_based_edge.hpp"
-#include "extractor/edge_based_node.hpp"
-#include "util/deallocating_vector.hpp"
-#include "util/typedefs.hpp"
-
-#include <string>
-#include <vector>
-
-#include <cstddef>
 
 namespace osrm
 {
@@ -49,8 +39,6 @@ namespace contractor
 class Contractor
 {
   public:
-    using EdgeData = QueryEdge::EdgeData;
-
     explicit Contractor(const ContractorConfig &config_) : config{config_} {}
 
     Contractor(const Contractor &) = delete;
@@ -58,26 +46,8 @@ class Contractor
 
     int Run();
 
-  protected:
-    void ContractGraph(const unsigned max_edge_id,
-                       util::DeallocatingVector<extractor::EdgeBasedEdge> &edge_based_edge_list,
-                       util::DeallocatingVector<QueryEdge> &contracted_edge_list,
-                       std::vector<EdgeWeight> &&node_weights,
-                       std::vector<bool> &is_core_node,
-                       std::vector<float> &inout_node_levels) const;
-    void WriteCoreNodeMarker(std::vector<bool> &&is_core_node) const;
-    void WriteContractedGraph(unsigned number_of_edge_based_nodes,
-                              util::DeallocatingVector<QueryEdge> contracted_edge_list);
-    void FindComponents(unsigned max_edge_id,
-                        const util::DeallocatingVector<extractor::EdgeBasedEdge> &edges,
-                        std::vector<extractor::EdgeBasedNode> &nodes) const;
-
   private:
     ContractorConfig config;
-
-    EdgeID LoadEdgeExpandedGraph(const ContractorConfig &config,
-                                 std::vector<extractor::EdgeBasedEdge> &edge_based_edge_list,
-                                 std::vector<EdgeWeight> &node_weights);
 };
 }
 }

@@ -50,7 +50,7 @@ unsigned getMedianSampleTime(const std::vector<unsigned> &timestamps)
 
 template <typename Algorithm>
 SubMatchingList mapMatching(SearchEngineData<Algorithm> &engine_working_data,
-                            const datafacade::ContiguousInternalMemoryDataFacade<Algorithm> &facade,
+                            const DataFacade<Algorithm> &facade,
                             const CandidateLists &candidates_list,
                             const std::vector<util::Coordinate> &trace_coordinates,
                             const std::vector<unsigned> &trace_timestamps,
@@ -79,16 +79,6 @@ SubMatchingList mapMatching(SearchEngineData<Algorithm> &engine_working_data,
         }
     }();
     const auto max_broken_time = median_sample_time * MAX_BROKEN_STATES;
-    const auto max_distance_delta = [&] {
-        if (use_timestamps)
-        {
-            return median_sample_time * facade.GetMapMatchingMaxSpeed();
-        }
-        else
-        {
-            return MAX_DISTANCE_DELTA;
-        }
-    }();
 
     std::vector<std::vector<double>> emission_log_probabilities(trace_coordinates.size());
     if (trace_gps_precision.empty())
@@ -155,24 +145,38 @@ SubMatchingList mapMatching(SearchEngineData<Algorithm> &engine_working_data,
     for (auto t = initial_timestamp + 1; t < candidates_list.size(); ++t)
     {
 
-        const bool gap_in_trace = [&]() {
-            // do not determine split if wasn't asked about it
-            if (allow_splitting)
+        const auto step_time = [&] {
+            if (use_timestamps)
             {
-                // use temporal information if available to determine a split
-                if (use_timestamps)
-                {
-                    return trace_timestamps[t] - trace_timestamps[prev_unbroken_timestamps.back()] >
-                           max_broken_time;
-                }
-                else
-                {
-                    return t - prev_unbroken_timestamps.back() > MAX_BROKEN_STATES;
-                }
+                return trace_timestamps[t] - trace_timestamps[prev_unbroken_timestamps.back()];
             }
             else
             {
-                return false;
+                return 1u;
+            }
+        }();
+
+        const auto max_distance_delta = [&] {
+            if (use_timestamps)
+            {
+                return step_time * facade.GetMapMatchingMaxSpeed();
+            }
+            else
+            {
+                return MAX_DISTANCE_DELTA;
+            }
+        }();
+
+        const bool gap_in_trace = [&]() {
+            // use temporal information if available to determine a split
+            // but do not determine split by timestamps if wasn't asked about it
+            if (use_timestamps && allow_splitting)
+            {
+                return step_time > max_broken_time;
+            }
+            else
+            {
+                return t - prev_unbroken_timestamps.back() > MAX_BROKEN_STATES;
             }
         }();
 
@@ -416,27 +420,20 @@ SubMatchingList mapMatching(SearchEngineData<Algorithm> &engine_working_data,
     return sub_matchings;
 }
 
+// CH
 template SubMatchingList
 mapMatching(SearchEngineData<ch::Algorithm> &engine_working_data,
-            const datafacade::ContiguousInternalMemoryDataFacade<ch::Algorithm> &facade,
+            const DataFacade<ch::Algorithm> &facade,
             const CandidateLists &candidates_list,
             const std::vector<util::Coordinate> &trace_coordinates,
             const std::vector<unsigned> &trace_timestamps,
             const std::vector<boost::optional<double>> &trace_gps_precision,
             const bool allow_splitting);
 
-template SubMatchingList
-mapMatching(SearchEngineData<corech::Algorithm> &engine_working_data,
-            const datafacade::ContiguousInternalMemoryDataFacade<corech::Algorithm> &facade,
-            const CandidateLists &candidates_list,
-            const std::vector<util::Coordinate> &trace_coordinates,
-            const std::vector<unsigned> &trace_timestamps,
-            const std::vector<boost::optional<double>> &trace_gps_precision,
-            const bool allow_splitting);
-
+// MLD
 template SubMatchingList
 mapMatching(SearchEngineData<mld::Algorithm> &engine_working_data,
-            const datafacade::ContiguousInternalMemoryDataFacade<mld::Algorithm> &facade,
+            const DataFacade<mld::Algorithm> &facade,
             const CandidateLists &candidates_list,
             const std::vector<util::Coordinate> &trace_coordinates,
             const std::vector<unsigned> &trace_timestamps,

@@ -1,8 +1,9 @@
 #include "storage/shared_memory.hpp"
 #include "storage/shared_monitor.hpp"
 #include "storage/storage.hpp"
-#include "util/exception.hpp"
+#include "osrm/exception.hpp"
 #include "util/log.hpp"
+#include "util/meminfo.hpp"
 #include "util/typedefs.hpp"
 #include "util/version.hpp"
 
@@ -51,12 +52,16 @@ void springClean()
 // generate boost::program_options object for the routing part
 bool generateDataStoreOptions(const int argc,
                               const char *argv[],
+                              std::string &verbosity,
                               boost::filesystem::path &base_path,
                               int &max_wait)
 {
     // declare a group of options that will be allowed only on command line
     boost::program_options::options_description generic_options("Options");
     generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message")(
+        "verbosity,l",
+        boost::program_options::value<std::string>(&verbosity)->default_value("INFO"),
+        std::string("Log verbosity level: " + util::LogPolicy::GetLevels()).c_str())(
         "remove-locks,r", "Remove locks")("spring-clean,s",
                                           "Spring-cleaning all shared memory regions");
 
@@ -156,12 +161,16 @@ int main(const int argc, const char *argv[]) try
 
     util::LogPolicy::GetInstance().Unmute();
 
+    std::string verbosity;
     boost::filesystem::path base_path;
     int max_wait = -1;
-    if (!generateDataStoreOptions(argc, argv, base_path, max_wait))
+    if (!generateDataStoreOptions(argc, argv, verbosity, base_path, max_wait))
     {
         return EXIT_SUCCESS;
     }
+
+    util::LogPolicy::GetInstance().SetLevel(verbosity);
+
     storage::StorageConfig config(base_path);
     if (!config.IsValid())
     {
@@ -172,8 +181,14 @@ int main(const int argc, const char *argv[]) try
 
     return storage.Run(max_wait);
 }
+catch (const osrm::RuntimeError &e)
+{
+    util::Log(logERROR) << e.what();
+    return e.GetCode();
+}
 catch (const std::bad_alloc &e)
 {
+    util::DumpMemoryStats();
     util::Log(logERROR) << "[exception] " << e.what();
     util::Log(logERROR) << "Please provide more memory or disable locking the virtual "
                            "address space (note: this makes OSRM swap, i.e. slow)";

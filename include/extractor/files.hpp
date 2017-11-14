@@ -1,11 +1,18 @@
 #ifndef OSRM_EXTRACTOR_FILES_HPP
 #define OSRM_EXTRACTOR_FILES_HPP
 
+#include "extractor/edge_based_edge.hpp"
 #include "extractor/guidance/turn_lane_types.hpp"
+#include "extractor/node_data_container.hpp"
+#include "extractor/profile_properties.hpp"
 #include "extractor/serialization.hpp"
+#include "extractor/turn_data_container.hpp"
 
 #include "util/coordinate.hpp"
+#include "util/guidance/bearing_class.hpp"
+#include "util/guidance/entry_class.hpp"
 #include "util/packed_vector.hpp"
+#include "util/range_table.hpp"
 #include "util/serialization.hpp"
 
 #include <boost/assert.hpp>
@@ -16,6 +23,84 @@ namespace extractor
 {
 namespace files
 {
+
+// writes the .osrm.icd file
+template <typename IntersectionBearingsT, typename EntryClassVectorT>
+inline void writeIntersections(const boost::filesystem::path &path,
+                               const IntersectionBearingsT &intersection_bearings,
+                               const EntryClassVectorT &entry_classes)
+{
+    static_assert(std::is_same<IntersectionBearingsContainer, IntersectionBearingsT>::value ||
+                      std::is_same<IntersectionBearingsView, IntersectionBearingsT>::value,
+                  "");
+
+    storage::io::FileWriter writer(path, storage::io::FileWriter::GenerateFingerprint);
+
+    serialization::write(writer, intersection_bearings);
+    storage::serialization::write(writer, entry_classes);
+}
+
+// read the .osrm.icd file
+template <typename IntersectionBearingsT, typename EntryClassVectorT>
+inline void readIntersections(const boost::filesystem::path &path,
+                              IntersectionBearingsT &intersection_bearings,
+                              EntryClassVectorT &entry_classes)
+{
+    static_assert(std::is_same<IntersectionBearingsContainer, IntersectionBearingsT>::value ||
+                      std::is_same<IntersectionBearingsView, IntersectionBearingsT>::value,
+                  "");
+
+    storage::io::FileReader reader(path, storage::io::FileReader::VerifyFingerprint);
+
+    serialization::read(reader, intersection_bearings);
+    storage::serialization::read(reader, entry_classes);
+}
+
+// reads .osrm.properties
+inline void readProfileProperties(const boost::filesystem::path &path,
+                                  ProfileProperties &properties)
+{
+    const auto fingerprint = storage::io::FileReader::VerifyFingerprint;
+    storage::io::FileReader reader{path, fingerprint};
+
+    serialization::read(reader, properties);
+}
+
+// writes .osrm.properties
+inline void writeProfileProperties(const boost::filesystem::path &path,
+                                   const ProfileProperties &properties)
+{
+    const auto fingerprint = storage::io::FileWriter::GenerateFingerprint;
+    storage::io::FileWriter writer{path, fingerprint};
+
+    serialization::write(writer, properties);
+}
+
+template <typename EdgeBasedEdgeVector>
+void writeEdgeBasedGraph(const boost::filesystem::path &path,
+                         EdgeID const number_of_edge_based_nodes,
+                         const EdgeBasedEdgeVector &edge_based_edge_list)
+{
+    static_assert(std::is_same<typename EdgeBasedEdgeVector::value_type, EdgeBasedEdge>::value, "");
+
+    storage::io::FileWriter writer(path, storage::io::FileWriter::GenerateFingerprint);
+
+    writer.WriteElementCount64(number_of_edge_based_nodes);
+    storage::serialization::write(writer, edge_based_edge_list);
+}
+
+template <typename EdgeBasedEdgeVector>
+void readEdgeBasedGraph(const boost::filesystem::path &path,
+                        EdgeID &number_of_edge_based_nodes,
+                        EdgeBasedEdgeVector &edge_based_edge_list)
+{
+    static_assert(std::is_same<typename EdgeBasedEdgeVector::value_type, EdgeBasedEdge>::value, "");
+
+    storage::io::FileReader reader(path, storage::io::FileReader::VerifyFingerprint);
+
+    number_of_edge_based_nodes = reader.ReadElementCount64();
+    storage::serialization::read(reader, edge_based_edge_list);
+}
 
 // reads .osrm.nodes
 template <typename CoordinatesT, typename PackedOSMIDsT>
@@ -138,6 +223,34 @@ inline void writeTurnData(const boost::filesystem::path &path, const TurnDataT &
     storage::io::FileWriter writer{path, fingerprint};
 
     serialization::write(writer, turn_data);
+}
+
+// reads .osrm.ebg_nodes
+template <typename NodeDataT>
+inline void readNodeData(const boost::filesystem::path &path, NodeDataT &node_data)
+{
+    static_assert(std::is_same<EdgeBasedNodeDataContainer, NodeDataT>::value ||
+                      std::is_same<EdgeBasedNodeDataView, NodeDataT>::value ||
+                      std::is_same<EdgeBasedNodeDataExternalContainer, NodeDataT>::value,
+                  "");
+    const auto fingerprint = storage::io::FileReader::VerifyFingerprint;
+    storage::io::FileReader reader{path, fingerprint};
+
+    serialization::read(reader, node_data);
+}
+
+// writes .osrm.ebg_nodes
+template <typename NodeDataT>
+inline void writeNodeData(const boost::filesystem::path &path, const NodeDataT &node_data)
+{
+    static_assert(std::is_same<EdgeBasedNodeDataContainer, NodeDataT>::value ||
+                      std::is_same<EdgeBasedNodeDataView, NodeDataT>::value ||
+                      std::is_same<EdgeBasedNodeDataExternalContainer, NodeDataT>::value,
+                  "");
+    const auto fingerprint = storage::io::FileWriter::GenerateFingerprint;
+    storage::io::FileWriter writer{path, fingerprint};
+
+    serialization::write(writer, node_data);
 }
 
 // reads .osrm.tls

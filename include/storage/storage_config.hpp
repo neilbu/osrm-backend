@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -30,6 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/filesystem/path.hpp>
 
+#include "storage/io_config.hpp"
+
 namespace osrm
 {
 namespace storage
@@ -40,38 +42,38 @@ namespace storage
  *
  * \see OSRM, EngineConfig
  */
-struct StorageConfig final
+struct StorageConfig final : IOConfig
 {
-    StorageConfig() = default;
+    StorageConfig(const boost::filesystem::path &base) : StorageConfig()
+    {
+        IOConfig::UseDefaultOutputNames(base);
+    }
 
-    /**
-     * Constructs a storage configuration setting paths based on a base path.
-     *
-     * \param base The base path (e.g. france.pbf.osrm) to derive auxiliary file suffixes from.
-     */
-    StorageConfig(const boost::filesystem::path &base);
-    bool IsValid() const;
-
-    boost::filesystem::path ram_index_path;
-    boost::filesystem::path file_index_path;
-    boost::filesystem::path hsgr_data_path;
-    boost::filesystem::path nodes_data_path;
-    boost::filesystem::path edges_data_path;
-    boost::filesystem::path core_data_path;
-    boost::filesystem::path geometries_path;
-    boost::filesystem::path timestamp_path;
-    boost::filesystem::path turn_weight_penalties_path;
-    boost::filesystem::path turn_duration_penalties_path;
-    boost::filesystem::path datasource_names_path;
-    boost::filesystem::path datasource_indexes_path;
-    boost::filesystem::path names_data_path;
-    boost::filesystem::path properties_path;
-    boost::filesystem::path intersection_class_path;
-    boost::filesystem::path turn_lane_data_path;
-    boost::filesystem::path turn_lane_description_path;
-    boost::filesystem::path mld_partition_path;
-    boost::filesystem::path mld_storage_path;
-    boost::filesystem::path mld_graph_path;
+    StorageConfig()
+        : IOConfig({".osrm.ramIndex",
+                    ".osrm.fileIndex",
+                    ".osrm.edges",
+                    ".osrm.geometry",
+                    ".osrm.timestamp",
+                    ".osrm.turn_weight_penalties",
+                    ".osrm.turn_duration_penalties",
+                    ".osrm.datasource_names",
+                    ".osrm.names",
+                    ".osrm.properties",
+                    ".osrm.icd"},
+                   {".osrm.hsgr",
+                    ".osrm.nbg_nodes",
+                    ".osrm.ebg_nodes",
+                    ".osrm.core",
+                    ".osrm.cells",
+                    ".osrm.cell_metrics",
+                    ".osrm.mldgr",
+                    ".osrm.tld",
+                    ".osrm.tls",
+                    ".osrm.partition"},
+                   {})
+    {
+    }
 };
 }
 }

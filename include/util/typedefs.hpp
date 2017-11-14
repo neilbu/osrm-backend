@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -45,26 +45,34 @@ struct osm_node_id
 struct osm_way_id
 {
 };
+struct duplicated_node
+{
+};
 }
 using OSMNodeID = osrm::Alias<std::uint64_t, tag::osm_node_id>;
 static_assert(std::is_pod<OSMNodeID>(), "OSMNodeID is not a valid alias");
 using OSMWayID = osrm::Alias<std::uint64_t, tag::osm_way_id>;
 static_assert(std::is_pod<OSMWayID>(), "OSMWayID is not a valid alias");
 
-static const OSMNodeID SPECIAL_OSM_NODEID = OSMNodeID{std::numeric_limits<std::uint64_t>::max()};
-static const OSMWayID SPECIAL_OSM_WAYID = OSMWayID{std::numeric_limits<std::uint32_t>::max()};
+using DuplicatedNodeID = std::uint64_t;
+using RestrictionID = std::uint64_t;
 
-static const OSMNodeID MAX_OSM_NODEID = OSMNodeID{std::numeric_limits<std::uint64_t>::max()};
-static const OSMNodeID MIN_OSM_NODEID = OSMNodeID{std::numeric_limits<std::uint64_t>::min()};
-static const OSMWayID MAX_OSM_WAYID = OSMWayID{std::numeric_limits<std::uint32_t>::max()};
-static const OSMWayID MIN_OSM_WAYID = OSMWayID{std::numeric_limits<std::uint32_t>::min()};
+static const OSMNodeID SPECIAL_OSM_NODEID =
+    OSMNodeID{std::numeric_limits<OSMNodeID::value_type>::max()};
+static const OSMWayID SPECIAL_OSM_WAYID =
+    OSMWayID{std::numeric_limits<OSMWayID::value_type>::max()};
 
-using OSMNodeID_weak = std::uint64_t;
-using OSMEdgeID_weak = std::uint64_t;
+static const OSMNodeID MAX_OSM_NODEID =
+    OSMNodeID{std::numeric_limits<OSMNodeID::value_type>::max()};
+static const OSMNodeID MIN_OSM_NODEID =
+    OSMNodeID{std::numeric_limits<OSMNodeID::value_type>::min()};
+static const OSMWayID MAX_OSM_WAYID = OSMWayID{std::numeric_limits<OSMWayID::value_type>::max()};
+static const OSMWayID MIN_OSM_WAYID = OSMWayID{std::numeric_limits<OSMWayID::value_type>::min()};
 
 using NodeID = std::uint32_t;
 using EdgeID = std::uint32_t;
 using NameID = std::uint32_t;
+using AnnotationID = std::uint32_t;
 using EdgeWeight = std::int32_t;
 using EdgeDuration = std::int32_t;
 using SegmentWeight = std::uint32_t;
@@ -96,8 +104,12 @@ static const EdgeID SPECIAL_EDGEID = std::numeric_limits<EdgeID>::max();
 static const NameID INVALID_NAMEID = std::numeric_limits<NameID>::max();
 static const NameID EMPTY_NAMEID = 0;
 static const unsigned INVALID_COMPONENTID = 0;
-static const SegmentWeight INVALID_SEGMENT_WEIGHT = (1u << 20) - 1;
-static const SegmentDuration INVALID_SEGMENT_DURATION = (1u << 20) - 1;
+static const std::size_t SEGMENT_WEIGHT_BITS = 22;
+static const std::size_t SEGMENT_DURAITON_BITS = 22;
+static const SegmentWeight INVALID_SEGMENT_WEIGHT = (1u << SEGMENT_WEIGHT_BITS) - 1;
+static const SegmentDuration INVALID_SEGMENT_DURATION = (1u << SEGMENT_DURAITON_BITS) - 1;
+static const SegmentWeight MAX_SEGMENT_WEIGHT = INVALID_SEGMENT_WEIGHT - 1;
+static const SegmentDuration MAX_SEGMENT_DURATION = INVALID_SEGMENT_DURATION - 1;
 static const EdgeWeight INVALID_EDGE_WEIGHT = std::numeric_limits<EdgeWeight>::max();
 static const EdgeDuration MAXIMAL_EDGE_DURATION = std::numeric_limits<EdgeDuration>::max();
 static const TurnPenalty INVALID_TURN_PENALTY = std::numeric_limits<TurnPenalty>::max();
@@ -146,5 +158,12 @@ struct GeometryID
 };
 
 static_assert(sizeof(SegmentID) == 4, "SegmentID needs to be 4 bytes big");
+
+// Strongly connected component ID of an edge-based node
+struct ComponentID
+{
+    std::uint32_t id : 31;
+    std::uint32_t is_tiny : 1;
+};
 
 #endif /* TYPEDEFS_H */

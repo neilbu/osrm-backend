@@ -4,6 +4,7 @@
 #include "engine/api/base_parameters.hpp"
 #include "engine/datafacade/datafacade_base.hpp"
 #include "engine/phantom_node.hpp"
+#include "engine/routing_algorithms.hpp"
 #include "engine/status.hpp"
 
 #include "util/coordinate.hpp"
@@ -15,6 +16,8 @@
 #include <iterator>
 #include <string>
 #include <vector>
+
+#include <util/log.hpp>
 
 namespace osrm
 {
@@ -32,6 +35,31 @@ class BasePlugin
             std::begin(coordinates), std::end(coordinates), [](const util::Coordinate coordinate) {
                 return !coordinate.IsValid();
             });
+    }
+
+    bool CheckAlgorithms(const api::BaseParameters &params,
+                         const RoutingAlgorithmsInterface &algorithms,
+                         util::json::Object &result) const
+    {
+        if (algorithms.IsValid())
+        {
+            return true;
+        }
+
+        if (!algorithms.HasExcludeFlags() && !params.exclude.empty())
+        {
+            Error("NotImplemented", "This algorithm does not support exclude flags.", result);
+            return false;
+        }
+        if (algorithms.HasExcludeFlags() && !params.exclude.empty())
+        {
+            Error("InvalidValue", "Exclude flag combination is not supported.", result);
+            return false;
+        }
+
+        BOOST_ASSERT_MSG(false,
+                         "There are only two reasons why the algorithm interface can be invalid.");
+        return false;
     }
 
     Status Error(const std::string &code,
@@ -118,9 +146,14 @@ class BasePlugin
 
         const bool use_hints = !parameters.hints.empty();
         const bool use_bearings = !parameters.bearings.empty();
+        const bool use_approaches = !parameters.approaches.empty();
 
         for (const auto i : util::irange<std::size_t>(0UL, parameters.coordinates.size()))
         {
+            Approach approach = engine::Approach::UNRESTRICTED;
+            if (use_approaches && parameters.approaches[i])
+                approach = parameters.approaches[i].get();
+
             if (use_hints && parameters.hints[i] &&
                 parameters.hints[i]->IsValid(parameters.coordinates[i], facade))
             {
@@ -137,12 +170,13 @@ class BasePlugin
                     facade.NearestPhantomNodesInRange(parameters.coordinates[i],
                                                       radiuses[i],
                                                       parameters.bearings[i]->bearing,
-                                                      parameters.bearings[i]->range);
+                                                      parameters.bearings[i]->range,
+                                                      approach);
             }
             else
             {
-                phantom_nodes[i] =
-                    facade.NearestPhantomNodesInRange(parameters.coordinates[i], radiuses[i]);
+                phantom_nodes[i] = facade.NearestPhantomNodesInRange(
+                    parameters.coordinates[i], radiuses[i], approach);
             }
         }
 
@@ -160,10 +194,15 @@ class BasePlugin
         const bool use_hints = !parameters.hints.empty();
         const bool use_bearings = !parameters.bearings.empty();
         const bool use_radiuses = !parameters.radiuses.empty();
+        const bool use_approaches = !parameters.approaches.empty();
 
         BOOST_ASSERT(parameters.IsValid());
         for (const auto i : util::irange<std::size_t>(0UL, parameters.coordinates.size()))
         {
+            Approach approach = engine::Approach::UNRESTRICTED;
+            if (use_approaches && parameters.approaches[i])
+                approach = parameters.approaches[i].get();
+
             if (use_hints && parameters.hints[i] &&
                 parameters.hints[i]->IsValid(parameters.coordinates[i], facade))
             {
@@ -183,27 +222,31 @@ class BasePlugin
                                                                   number_of_results,
                                                                   *parameters.radiuses[i],
                                                                   parameters.bearings[i]->bearing,
-                                                                  parameters.bearings[i]->range);
+                                                                  parameters.bearings[i]->range,
+                                                                  approach);
                 }
                 else
                 {
                     phantom_nodes[i] = facade.NearestPhantomNodes(parameters.coordinates[i],
                                                                   number_of_results,
                                                                   parameters.bearings[i]->bearing,
-                                                                  parameters.bearings[i]->range);
+                                                                  parameters.bearings[i]->range,
+                                                                  approach);
                 }
             }
             else
             {
                 if (use_radiuses && parameters.radiuses[i])
                 {
-                    phantom_nodes[i] = facade.NearestPhantomNodes(
-                        parameters.coordinates[i], number_of_results, *parameters.radiuses[i]);
+                    phantom_nodes[i] = facade.NearestPhantomNodes(parameters.coordinates[i],
+                                                                  number_of_results,
+                                                                  *parameters.radiuses[i],
+                                                                  approach);
                 }
                 else
                 {
-                    phantom_nodes[i] =
-                        facade.NearestPhantomNodes(parameters.coordinates[i], number_of_results);
+                    phantom_nodes[i] = facade.NearestPhantomNodes(
+                        parameters.coordinates[i], number_of_results, approach);
                 }
             }
 
@@ -224,10 +267,15 @@ class BasePlugin
         const bool use_hints = !parameters.hints.empty();
         const bool use_bearings = !parameters.bearings.empty();
         const bool use_radiuses = !parameters.radiuses.empty();
+        const bool use_approaches = !parameters.approaches.empty();
 
         BOOST_ASSERT(parameters.IsValid());
         for (const auto i : util::irange<std::size_t>(0UL, parameters.coordinates.size()))
         {
+            Approach approach = engine::Approach::UNRESTRICTED;
+            if (use_approaches && parameters.approaches[i])
+                approach = parameters.approaches[i].get();
+
             if (use_hints && parameters.hints[i] &&
                 parameters.hints[i]->IsValid(parameters.coordinates[i], facade))
             {
@@ -245,7 +293,8 @@ class BasePlugin
                             parameters.coordinates[i],
                             *parameters.radiuses[i],
                             parameters.bearings[i]->bearing,
-                            parameters.bearings[i]->range);
+                            parameters.bearings[i]->range,
+                            approach);
                 }
                 else
                 {
@@ -253,7 +302,8 @@ class BasePlugin
                         facade.NearestPhantomNodeWithAlternativeFromBigComponent(
                             parameters.coordinates[i],
                             parameters.bearings[i]->bearing,
-                            parameters.bearings[i]->range);
+                            parameters.bearings[i]->range,
+                            approach);
                 }
             }
             else
@@ -262,13 +312,13 @@ class BasePlugin
                 {
                     phantom_node_pairs[i] =
                         facade.NearestPhantomNodeWithAlternativeFromBigComponent(
-                            parameters.coordinates[i], *parameters.radiuses[i]);
+                            parameters.coordinates[i], *parameters.radiuses[i], approach);
                 }
                 else
                 {
                     phantom_node_pairs[i] =
                         facade.NearestPhantomNodeWithAlternativeFromBigComponent(
-                            parameters.coordinates[i]);
+                            parameters.coordinates[i], approach);
                 }
             }
 

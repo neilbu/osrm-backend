@@ -46,6 +46,7 @@ Thumbs.db
 
 # build related files #
 #######################
+/_build*
 /build/
 /example/build/
 /test/data/monaco*
@@ -60,6 +61,11 @@ Thumbs.db
 .scb
 .cproject
 .project
+
+# Visual Studio (Code) related files #
+######################################
+/.vs*
+/*.local.bat
 
 # stxxl related files #
 #######################

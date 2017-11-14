@@ -21,8 +21,7 @@ class JourneyPlugin final : public BasePlugin
   public:
     explicit JourneyPlugin(const int max_locations_distance_table);
 
-    Status HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                         const RoutingAlgorithmsInterface &algorithms,
+    Status HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                          const api::JourneyParameters &params,
                          util::json::Object &result) const;
 

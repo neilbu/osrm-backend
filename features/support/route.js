@@ -46,8 +46,9 @@ module.exports = function () {
         return waypoints.map(w => [w.lon, w.lat].map(ensureDecimal).join(','));
     };
 
-    this.requestRoute = (waypoints, bearings, userParams, callback) => {
+    this.requestRoute = (waypoints, bearings, approaches, userParams, callback) => {
         if (bearings.length && bearings.length !== waypoints.length) throw new Error('*** number of bearings does not equal the number of waypoints');
+        if (approaches.length && approaches.length !== waypoints.length) throw new Error('*** number of approaches does not equal the number of waypoints');
 
         var defaults = {
                 output: 'json',
@@ -67,6 +68,9 @@ module.exports = function () {
             }).join(';');
         }
 
+        if (approaches.length) {
+            params.approaches = approaches.join(';');
+        }
         return this.requestPath('route', params, callback);
     };
 
@@ -151,6 +155,10 @@ module.exports = function () {
         return this.extractInstructionList(instructions, s => s.destinations || '');
     };
 
+    this.exitsList = (instructions) => {
+        return this.extractInstructionList(instructions, s => s.exits || '');
+    };
+
     this.reverseBearing = (bearing) => {
         if (bearing >= 180)
             return bearing - 180.;
@@ -161,6 +169,28 @@ module.exports = function () {
         return this.extractInstructionList(instructions, s => ('in' in s.intersections[0] ? this.reverseBearing(s.intersections[0].bearings[s.intersections[0].in]) : 0)
                                                               + '->' +
                                                               ('out' in s.intersections[0] ? s.intersections[0].bearings[s.intersections[0].out] : 0));
+    };
+
+    this.lanesList = (instructions) => {
+        return this.extractInstructionList(instructions, s => {
+            return s.intersections.map( i => {
+                if(i.lanes)
+                {
+                    return i.lanes.map( l => {
+                        let indications = l.indications.join(';');
+                        return indications + ':' + (l.valid ? 'true' : 'false');
+                    }).join(' ');
+                }
+                else
+                {
+                    return '';
+                }
+            }).join(';');
+        });
+    };
+
+    this.approachList = (instructions) => {
+        return this.extractInstructionList(instructions, s => s.approaches || '');
     };
 
     this.annotationList = (instructions) => {
@@ -183,17 +213,6 @@ module.exports = function () {
     this.alternativesList = (instructions) => {
         // alternatives_count come from tracepoints list
         return instructions.tracepoints.map(t => t.alternatives_count.toString()).join(',');
-    };
-
-    this.lanesList = (instructions) => {
-        return this.extractInstructionList(instructions, instruction => {
-            if( 'lanes' in instruction.intersections[0] )
-            {
-                return instruction.intersections[0].lanes.map( p => { return (p.indications).join(';') + ':' + p.valid; } ).join(' ');
-            } else
-            {
-                return '';
-            }});
     };
 
     this.turnList = (instructions) => {
@@ -246,6 +265,14 @@ module.exports = function () {
 
     this.modeList = (instructions) => {
         return this.extractInstructionList(instructions, s => s.mode);
+    };
+
+    this.drivingSideList = (instructions) => {
+        return this.extractInstructionList(instructions, s => s.driving_side);
+    };
+
+    this.classesList = (instructions) => {
+        return this.extractInstructionList(instructions, s => '[' + s.intersections.map(i => '(' + (i.classes ? i.classes.join(',') : '') + ')').join(',') + ']');
     };
 
     this.timeList = (instructions) => {

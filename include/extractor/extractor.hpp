@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2016, Project OSRM contributors
+Copyright (c) 2017, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "extractor/edge_based_graph_factory.hpp"
 #include "extractor/extractor_config.hpp"
 #include "extractor/graph_compressor.hpp"
+#include "extractor/packed_osm_ids.hpp"
 
 #include "util/guidance/bearing_class.hpp"
 #include "util/guidance/entry_class.hpp"
@@ -56,54 +57,49 @@ class Extractor
   private:
     ExtractorConfig config;
 
-    std::pair<std::size_t, EdgeID>
-    BuildEdgeExpandedGraph(ScriptingEnvironment &scripting_environment,
-                           std::vector<util::Coordinate> &coordinates,
-                           extractor::PackedOSMIDs &osm_node_ids,
-                           std::vector<EdgeBasedNode> &node_based_edge_list,
-                           std::vector<bool> &node_is_startpoint,
-                           std::vector<EdgeWeight> &edge_based_node_weights,
-                           util::DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list,
-                           const std::string &intersection_class_output_file);
-    void WriteProfileProperties(const std::string &output_path,
-                                const ProfileProperties &properties) const;
+    std::tuple<guidance::LaneDescriptionMap,
+               std::vector<TurnRestriction>,
+               std::vector<ConditionalTurnRestriction>>
+    ParseOSMData(ScriptingEnvironment &scripting_environment, const unsigned number_of_threads);
+
+    EdgeID BuildEdgeExpandedGraph(
+        // input data
+        const util::NodeBasedDynamicGraph &node_based_graph,
+        const std::vector<util::Coordinate> &coordinates,
+        const CompressedEdgeContainer &compressed_edge_container,
+        const std::unordered_set<NodeID> &barrier_nodes,
+        const std::unordered_set<NodeID> &traffic_lights,
+        const std::vector<TurnRestriction> &turn_restrictions,
+        const std::vector<ConditionalTurnRestriction> &conditional_turn_restrictions,
+        // might have to be updated to add new lane combinations
+        guidance::LaneDescriptionMap &turn_lane_map,
+        // for calculating turn penalties
+        ScriptingEnvironment &scripting_environment,
+        // output data
+        EdgeBasedNodeDataContainer &edge_based_nodes_container,
+        std::vector<EdgeBasedNodeSegment> &edge_based_node_segments,
+        std::vector<bool> &node_is_startpoint,
+        std::vector<EdgeWeight> &edge_based_node_weights,
+        util::DeallocatingVector<EdgeBasedEdge> &edge_based_edge_list,
+        const std::string &intersection_class_output_file);
+
     void FindComponents(unsigned max_edge_id,
-                        const util::DeallocatingVector<EdgeBasedEdge> &edges,
-                        std::vector<EdgeBasedNode> &nodes) const;
-    void BuildRTree(std::vector<EdgeBasedNode> node_based_edge_list,
+                        const util::DeallocatingVector<EdgeBasedEdge> &input_edge_list,
+                        const std::vector<EdgeBasedNodeSegment> &input_node_segments,
+                        EdgeBasedNodeDataContainer &nodes_container) const;
+    void BuildRTree(std::vector<EdgeBasedNodeSegment> edge_based_node_segments,
                     std::vector<bool> node_is_startpoint,
                     const std::vector<util::Coordinate> &coordinates);
     std::shared_ptr<RestrictionMap> LoadRestrictionMap();
-    std::shared_ptr<util::NodeBasedDynamicGraph>
-    LoadNodeBasedGraph(std::unordered_set<NodeID> &barrier_nodes,
-                       std::unordered_set<NodeID> &traffic_lights,
-                       std::vector<util::Coordinate> &coordinates,
-                       extractor::PackedOSMIDs &osm_node_ids);
-
-    void WriteEdgeBasedGraph(const std::string &output_file_filename,
-                             const EdgeID max_edge_id,
-                             util::DeallocatingVector<EdgeBasedEdge> const &edge_based_edge_list);
-
-    void WriteIntersectionClassificationData(
-        const std::string &output_file_name,
-        const std::vector<std::uint32_t> &node_based_intersection_classes,
-        const std::vector<util::guidance::BearingClass> &bearing_classes,
-        const std::vector<util::guidance::EntryClass> &entry_classes) const;
-
-    void WriteTurnLaneData(const std::string &turn_lane_file) const;
 
     // Writes compressed node based graph and its embedding into a file for osrm-partition to use.
     static void WriteCompressedNodeBasedGraph(const std::string &path,
                                               const util::NodeBasedDynamicGraph &graph,
                                               const std::vector<util::Coordinate> &coordiantes);
 
-    // globals persisting during the extraction process and the graph generation process
-
-    // during turn lane analysis, we might have to combine lanes for roads that are modelled as two
-    // but are more or less experienced as one. This can be due to solid lines in between lanes, for
-    // example, that genereate a small separation between them. As a result, we might have to
-    // augment the turn lane map during processing, further adding more types.
-    guidance::LaneDescriptionMap turn_lane_map;
+    void WriteConditionalRestrictions(
+        const std::string &path,
+        std::vector<ConditionalTurnRestriction> &conditional_turn_restrictions);
 };
 }
 }

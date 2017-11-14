@@ -36,3 +36,42 @@ Feature: Projection to nearest point on road
             | from | to | route     | distance |
             | d    | b  | abc,abc   | 0m       |
             | b    | d  | abc,abc   | 0m       |
+
+
+    Scenario: Projection results negative duration
+        Given the profile file
+        """
+        functions = require('testbot')
+
+        function segment_function(profile, segment)
+          segment.weight = 5.5
+          segment.duration = 2.8
+        end
+
+        functions.process_segment = segment_function
+        return functions
+        """
+
+        Given the node locations
+            | node |        lon |        lat |
+            |    e | -51.218994 | -30.023866 |
+            |    f | -51.218918 | -30.023741 |
+            |    1 | -51.219109 | -30.023766 |
+            |    2 | -51.219109 | -30.023764 |
+            |    3 | -51.219109 | -30.023763 |
+            |    4 | -51.219109 | -30.023762 |
+            |    5 | -51.219109 | -30.023761 |
+            |    6 | -51.219109 | -30.023756 |
+
+        And the ways
+            | nodes |
+            | ef    |
+
+        When I route I should get
+            | waypoints | route | distance | time | weight |
+            | 1,4       | ef,ef | 0.4m     | 0.1s |    0.1 |
+            | 2,4       | ef,ef | 0.1m     | 0s   |      0 |
+            | 3,4       | ef,ef | 0.1m     | 0s   |      0 |
+            | 4,4       | ef,ef | 0m       | 0s   |      0 |
+            | 5,4       | ef,ef | 0.1m     | 0s   |    0.1 |
+            | 6,4       | ef,ef | 0.6m     | 0.1s |    0.2 |

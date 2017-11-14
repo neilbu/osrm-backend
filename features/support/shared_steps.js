@@ -34,10 +34,13 @@ module.exports = function () {
                 var afterRequest = (err, res, body) => {
                     if (err) return cb(err);
                     if (body && body.length) {
-                        let destinations, pronunciations, instructions, refs, bearings, turns, modes, times,
-                            distances, summary, intersections, lanes, locations, annotation, weight_name, weights;
+                        let destinations, exits, pronunciations, instructions, refs, bearings, turns, modes, times, classes,
+                            distances, summary, intersections, lanes, locations, annotation, weight_name, weights, approaches,
+                            driving_sides;
 
                         let json = JSON.parse(body);
+
+                        got.code = json.code;
 
                         let hasRoute = json.code === 'Ok';
 
@@ -46,10 +49,13 @@ module.exports = function () {
                             pronunciations = this.pronunciationList(json.routes[0]);
                             refs = this.refList(json.routes[0]);
                             destinations = this.destinationsList(json.routes[0]);
+                            exits = this.exitsList(json.routes[0]);
                             bearings = this.bearingList(json.routes[0]);
                             turns = this.turnList(json.routes[0]);
                             intersections = this.intersectionList(json.routes[0]);
                             modes = this.modeList(json.routes[0]);
+                            driving_sides = this.drivingSideList(json.routes[0]);
+                            classes = this.classesList(json.routes[0]);
                             times = this.timeList(json.routes[0]);
                             distances = this.distanceList(json.routes[0]);
                             lanes = this.lanesList(json.routes[0]);
@@ -58,6 +64,7 @@ module.exports = function () {
                             annotation = this.annotationList(json.routes[0]);
                             weight_name = this.weightName(json.routes[0]);
                             weights = this.weightList(json.routes[0]);
+                            approaches = this.approachList(json.routes[0]);
                         }
 
                         if (headers.has('status')) {
@@ -144,7 +151,10 @@ module.exports = function () {
                         if (headers.has('locations')){
                             got.locations = (locations || '').trim();
                         }
-
+/*
+                        if (headers.has('approaches')){
+                            got.approaches = (approaches || '').trim();
+                        }*/
                         // if header matches 'a:*', parse out the values for *
                         // and return in that header
                         headers.forEach((k) => {
@@ -167,13 +177,20 @@ module.exports = function () {
                         putValue('bearing', bearings);
                         putValue('turns', turns);
                         putValue('modes', modes);
+                        putValue('classes', classes);
                         putValue('times', times);
                         putValue('distances', distances);
                         putValue('pronunciations', pronunciations);
                         putValue('destinations', destinations);
+                        putValue('exits', exits);
                         putValue('weight_name', weight_name);
                         putValue('weights', weights);
                         putValue('weight', weight);
+                        putValue('approach', approaches);
+
+                        if (driving_sides) {
+                            putValue('driving_side', driving_sides);
+                        }
 
                         for (var key in row) {
                             if (this.FuzzyMatch.match(got[key], row[key])) {
@@ -208,33 +225,39 @@ module.exports = function () {
 
                     var params = this.overwriteParams(defaultParams, userParams),
                         waypoints = [],
-                        bearings = [];
+                        bearings = [],
+                        approaches = [];
 
                     if (row.bearings) {
                         got.bearings = row.bearings;
                         bearings = row.bearings.split(' ').filter(b => !!b);
                     }
 
+                    if (row.approaches) {
+                        got.approaches = row.approaches;
+                        approaches = row.approaches.split(' ').filter(b => !!b);
+                    }
+
                     if (row.from && row.to) {
                         var fromNode = this.findNodeByName(row.from);
-                        if (!fromNode) return cb(new Error(util.format('*** unknown from-node "%s"'), row.from));
+                        if (!fromNode) return cb(new Error(util.format('*** unknown from-node "%s"', row.from)));
                         waypoints.push(fromNode);
 
                         var toNode = this.findNodeByName(row.to);
-                        if (!toNode) return cb(new Error(util.format('*** unknown to-node "%s"'), row.to));
+                        if (!toNode) return cb(new Error(util.format('*** unknown to-node "%s"', row.to)));
                         waypoints.push(toNode);
 
                         got.from = row.from;
                         got.to = row.to;
-                        this.requestRoute(waypoints, bearings, params, afterRequest);
+                        this.requestRoute(waypoints, bearings, approaches, params, afterRequest);
                     } else if (row.waypoints) {
                         row.waypoints.split(',').forEach((n) => {
                             var node = this.findNodeByName(n.trim());
-                            if (!node) return cb(new Error('*** unknown waypoint node "%s"', n.trim()));
+                            if (!node) return cb(new Error(util.format('*** unknown waypoint node "%s"', n.trim())));
                             waypoints.push(node);
                         });
                         got.waypoints = row.waypoints;
-                        this.requestRoute(waypoints, bearings, params, afterRequest);
+                        this.requestRoute(waypoints, bearings, approaches, params, afterRequest);
                     } else {
                         return cb(new Error('*** no waypoints'));
                     }

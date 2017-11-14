@@ -4,7 +4,6 @@ Feature: Weight tests
     Background:
         Given the profile "testbot"
         Given a grid size of 10 meters
-        Given the extract extra arguments "--generate-edge-lookup"
         Given the query options
             | geometries | geojson |
 
@@ -61,18 +60,27 @@ Feature: Weight tests
 
 
     Scenario: Step weights -- way_function: fail if no weight or weight_per_meter property
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.forward_speed = 42
           result.backward_speed = 42
         end
+
+        return functions
         """
         And the node map
             """
@@ -88,18 +96,27 @@ Feature: Weight tests
         And it should exit with an error
 
     Scenario: Step weights -- way_function: second way wins
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.duration = 42
           result.weight = 35
         end
+
+        return functions
         """
 
         Given the node map
@@ -120,19 +137,28 @@ Feature: Weight tests
             | h,a       | ,     | 140m +-1 | 35,0    | 42s,0s |
 
     Scenario: Step weights -- way_function: higher weight_per_meter is preferred
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.duration = 42
           result.forward_rate = 1
           result.backward_rate = 0.5
         end
+
+        return functions
         """
 
         Given the node map
@@ -156,22 +182,32 @@ Feature: Weight tests
             | h,f       | ,     | 40m      | 80,0    | 12s,0s |
 
     Scenario: Step weights -- segment_function
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.weight = 42
           result.duration = 3
         end
-        function segment_function (segment)
+
+        functions.process_segment = function(profile, segment)
           segment.weight = 1
           segment.duration = 11
         end
+
+        return functions
         """
 
         Given the node map
@@ -196,28 +232,39 @@ Feature: Weight tests
 
 
     Scenario: Step weights -- segment_function and turn_function with weight precision
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        properties.weight_precision = 3
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          profile.properties.weight_precision = 3
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.weight = 42
           result.duration = 3
         end
-        function segment_function (segment)
+
+        functions.process_segment = function(profile, segment)
           segment.weight = 1.11
           segment.duration = 100
         end
-        function turn_function (turn)
+
+        functions.process_turn = function(profile, turn)
           print (turn.angle)
           turn.weight = 2 + turn.angle / 100
           turn.duration = turn.angle
         end
+
+        return functions
         """
 
         Given the node map
@@ -242,22 +289,32 @@ Feature: Weight tests
 
     @traffic @speed
     Scenario: Step weights -- segment_function with speed and turn updates
-        Given the profile file "testbot" extended with
+        Given the profile file
         """
-        api_version = 1
-        properties.traffic_signal_penalty = 0
-        properties.u_turn_penalty = 0
-        properties.weight_name = 'steps'
-        function way_function(way, result)
+        local functions = require('testbot')
+        functions.setup_testbot = functions.setup
+
+        functions.setup = function()
+          local profile = functions.setup_testbot()
+          profile.properties.traffic_signal_penalty = 0
+          profile.properties.u_turn_penalty = 0
+          profile.properties.weight_name = 'steps'
+          return profile
+        end
+
+        functions.process_way = function(profile, way, result)
           result.forward_mode = mode.driving
           result.backward_mode = mode.driving
           result.weight = 42
           result.duration = 3
         end
-        function segment_function (segment)
+
+        functions.process_segment = function(profile, segment)
           segment.weight = 10
           segment.duration = 11
         end
+
+        return functions
         """
 
         And the node map
@@ -290,10 +347,9 @@ Feature: Weight tests
 
     @traffic @speed
     Scenario: Step weights -- segment_function with speed and turn updates with fallback to durations
-        Given the profile file "testbot" extended with
+        Given the profile file "testbot" initialized with
         """
-        api_version = 1
-        properties.weight_precision = 3
+        profile.properties.weight_precision = 3
         """
 
         And the node map
@@ -323,3 +379,36 @@ Feature: Weight tests
             | a,d       | abcd,abcd  | 59.9m    | 6.996,0       | 7s,0s    |
             | a,e       | abcd,ce,ce | 60.1m    | 6.005,2.002,0 | 6s,2s,0s |
             | d,e       | abcd,ce,ce | 39.9m    | 1.991,2.002,0 | 2s,2s,0s |
+
+    @traffic @speed
+    Scenario: Updating speeds without affecting weights.
+        Given the profile file "testbot" initialized with
+        """
+        profile.properties.weight_precision = 3
+        """
+
+        And the node map
+            """
+            a-----------b
+             \         /
+                c----d
+            """
+        And the ways
+            | nodes | highway       | maxspeed |
+            | ab    | living_street | 5        |
+            | acdb  | motorway      | 100      |
+
+        # Note the comma on the last column - this indicates 'keep existing weight value'
+        And the speed file
+            """
+            1,2,100,
+            1,3,5,,junk
+            3,4,5,,
+            4,2,5,
+            """
+        And the contract extra arguments "--segment-speed-file {speeds_file}"
+        And the customize extra arguments "--segment-speed-file {speeds_file}"
+
+        When I route I should get
+            | waypoints | route      | distance | weights       | times    |
+            | a,b       | acdb,acdb  | 78.3m    | 11.744,0      | 56.4s,0s  |

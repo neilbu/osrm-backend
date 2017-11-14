@@ -12,6 +12,8 @@
 #include "storage/io_fwd.hpp"
 #include "storage/shared_memory_ownership.hpp"
 
+#include "customizer/cell_metric.hpp"
+
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/range/iterator_range.hpp>
 #include <tbb/parallel_sort.h>
@@ -46,18 +48,18 @@ namespace detail
 template <storage::Ownership Ownership> class CellStorageImpl
 {
   public:
-    using WeightOffset = std::uint32_t;
+    using ValueOffset = std::uint32_t;
     using BoundaryOffset = std::uint32_t;
     using BoundarySize = std::uint32_t;
     using SourceIndex = std::uint32_t;
     using DestinationIndex = std::uint32_t;
 
-    static constexpr auto INVALID_WEIGHT_OFFSET = std::numeric_limits<WeightOffset>::max();
+    static constexpr auto INVALID_VALUE_OFFSET = std::numeric_limits<ValueOffset>::max();
     static constexpr auto INVALID_BOUNDARY_OFFSET = std::numeric_limits<BoundaryOffset>::max();
 
     struct CellData
     {
-        WeightOffset weight_offset = INVALID_WEIGHT_OFFSET;
+        ValueOffset value_offset = INVALID_VALUE_OFFSET;
         BoundaryOffset source_boundary_offset = INVALID_BOUNDARY_OFFSET;
         BoundaryOffset destination_boundary_offset = INVALID_BOUNDARY_OFFSET;
         BoundarySize num_source_nodes = 0;
@@ -69,15 +71,16 @@ template <storage::Ownership Ownership> class CellStorageImpl
 
     // Implementation of the cell view. We need a template parameter here
     // because we need to derive a read-only and read-write view from this.
-    template <typename WeightValueT> class CellImpl
+    template <typename WeightValueT, typename DurationValueT> class CellImpl
     {
       private:
         using WeightPtrT = WeightValueT *;
-        using WeightRefT = WeightValueT &;
+        using DurationPtrT = DurationValueT *;
         BoundarySize num_source_nodes;
         BoundarySize num_destination_nodes;
 
         WeightPtrT const weights;
+        DurationPtrT const durations;
         const NodeID *const source_boundary;
         const NodeID *const destination_boundary;
 
@@ -123,20 +126,19 @@ template <storage::Ownership Ownership> class CellStorageImpl
             const std::size_t stride;
         };
 
-      public:
-        auto GetOutWeight(NodeID node) const
+        template <typename ValuePtr> auto GetOutRange(const ValuePtr ptr, const NodeID node) const
         {
             auto iter = std::find(source_boundary, source_boundary + num_source_nodes, node);
             if (iter == source_boundary + num_source_nodes)
-                return boost::make_iterator_range(weights, weights);
+                return boost::make_iterator_range(ptr, ptr);
 
             auto row = std::distance(source_boundary, iter);
-            auto begin = weights + num_destination_nodes * row;
+            auto begin = ptr + num_destination_nodes * row;
             auto end = begin + num_destination_nodes;
             return boost::make_iterator_range(begin, end);
         }
 
-        auto GetInWeight(NodeID node) const
+        template <typename ValuePtr> auto GetInRange(const ValuePtr ptr, const NodeID node) const
         {
             auto iter =
                 std::find(destination_boundary, destination_boundary + num_destination_nodes, node);
@@ -144,11 +146,20 @@ template <storage::Ownership Ownership> class CellStorageImpl
                 return boost::make_iterator_range(ColumnIterator{}, ColumnIterator{});
 
             auto column = std::distance(destination_boundary, iter);
-            auto begin = ColumnIterator{weights + column, num_destination_nodes};
-            auto end = ColumnIterator{weights + column + num_source_nodes * num_destination_nodes,
+            auto begin = ColumnIterator{ptr + column, num_destination_nodes};
+            auto end = ColumnIterator{ptr + column + num_source_nodes * num_destination_nodes,
                                       num_destination_nodes};
             return boost::make_iterator_range(begin, end);
         }
+
+      public:
+        auto GetOutWeight(NodeID node) const { return GetOutRange(weights, node); }
+
+        auto GetInWeight(NodeID node) const { return GetInRange(weights, node); }
+
+        auto GetOutDuration(NodeID node) const { return GetOutRange(durations, node); }
+
+        auto GetInDuration(NodeID node) const { return GetInRange(durations, node); }
 
         auto GetSourceNodes() const
         {
@@ -162,16 +173,19 @@ template <storage::Ownership Ownership> class CellStorageImpl
         }
 
         CellImpl(const CellData &data,
-                 WeightPtrT const all_weight,
+                 WeightPtrT const all_weights,
+                 DurationPtrT const all_durations,
                  const NodeID *const all_sources,
                  const NodeID *const all_destinations)
             : num_source_nodes{data.num_source_nodes},
               num_destination_nodes{data.num_destination_nodes},
-              weights{all_weight + data.weight_offset},
+              weights{all_weights + data.value_offset},
+              durations{all_durations + data.value_offset},
               source_boundary{all_sources + data.source_boundary_offset},
               destination_boundary{all_destinations + data.destination_boundary_offset}
         {
-            BOOST_ASSERT(all_weight != nullptr);
+            BOOST_ASSERT(all_weights != nullptr);
+            BOOST_ASSERT(all_durations != nullptr);
             BOOST_ASSERT(num_source_nodes == 0 || all_sources != nullptr);
             BOOST_ASSERT(num_destination_nodes == 0 || all_destinations != nullptr);
         }
@@ -180,8 +194,8 @@ template <storage::Ownership Ownership> class CellStorageImpl
     std::size_t LevelIDToIndex(LevelID level) const { return level - 1; }
 
   public:
-    using Cell = CellImpl<EdgeWeight>;
-    using ConstCell = CellImpl<const EdgeWeight>;
+    using Cell = CellImpl<EdgeWeight, EdgeDuration>;
+    using ConstCell = CellImpl<const EdgeWeight, const EdgeDuration>;
 
     CellStorageImpl() {}
 
@@ -304,30 +318,49 @@ template <storage::Ownership Ownership> class CellStorageImpl
                                   << " Number of unconnected nodes is " << number_of_unconneced;
         }
 
-        // Set weight offsets and calculate total storage size
-        WeightOffset weight_offset = 0;
+        // Set cell values offsets and calculate total storage size
+        ValueOffset value_offset = 0;
         for (auto &cell : cells)
         {
-            cell.weight_offset = weight_offset;
-            weight_offset += cell.num_source_nodes * cell.num_destination_nodes;
+            cell.value_offset = value_offset;
+            value_offset += cell.num_source_nodes * cell.num_destination_nodes;
+        }
+    }
+
+    // Returns a new metric that can be used with this container
+    customizer::CellMetric MakeMetric() const
+    {
+        customizer::CellMetric metric;
+
+        if (cells.empty())
+        {
+            return metric;
         }
 
-        weights.resize(weight_offset + 1, INVALID_EDGE_WEIGHT);
+        const auto &last_cell = cells.back();
+        ValueOffset total_size =
+            last_cell.value_offset + last_cell.num_source_nodes * last_cell.num_destination_nodes;
+
+        metric.weights.resize(total_size + 1, INVALID_EDGE_WEIGHT);
+        metric.durations.resize(total_size + 1, MAXIMAL_EDGE_DURATION);
+
+        return metric;
     }
 
     template <typename = std::enable_if<Ownership == storage::Ownership::View>>
-    CellStorageImpl(Vector<EdgeWeight> weights_,
-                    Vector<NodeID> source_boundary_,
+    CellStorageImpl(Vector<NodeID> source_boundary_,
                     Vector<NodeID> destination_boundary_,
                     Vector<CellData> cells_,
                     Vector<std::uint64_t> level_to_cell_offset_)
-        : weights(std::move(weights_)), source_boundary(std::move(source_boundary_)),
+        : source_boundary(std::move(source_boundary_)),
           destination_boundary(std::move(destination_boundary_)), cells(std::move(cells_)),
           level_to_cell_offset(std::move(level_to_cell_offset_))
     {
     }
 
-    ConstCell GetCell(LevelID level, CellID id) const
+    ConstCell GetCell(const customizer::detail::CellMetricImpl<Ownership> &metric,
+                      LevelID level,
+                      CellID id) const
     {
         const auto level_index = LevelIDToIndex(level);
         BOOST_ASSERT(level_index < level_to_cell_offset.size());
@@ -335,21 +368,25 @@ template <storage::Ownership Ownership> class CellStorageImpl
         const auto cell_index = offset + id;
         BOOST_ASSERT(cell_index < cells.size());
         return ConstCell{cells[cell_index],
-                         weights.data(),
+                         metric.weights.data(),
+                         metric.durations.data(),
                          source_boundary.empty() ? nullptr : source_boundary.data(),
                          destination_boundary.empty() ? nullptr : destination_boundary.data()};
     }
 
     template <typename = std::enable_if<Ownership == storage::Ownership::Container>>
-    Cell GetCell(LevelID level, CellID id)
+    Cell GetCell(customizer::CellMetric &metric, LevelID level, CellID id) const
     {
         const auto level_index = LevelIDToIndex(level);
         BOOST_ASSERT(level_index < level_to_cell_offset.size());
         const auto offset = level_to_cell_offset[level_index];
         const auto cell_index = offset + id;
         BOOST_ASSERT(cell_index < cells.size());
-        return Cell{
-            cells[cell_index], weights.data(), source_boundary.data(), destination_boundary.data()};
+        return Cell{cells[cell_index],
+                    metric.weights.data(),
+                    metric.durations.data(),
+                    source_boundary.data(),
+                    destination_boundary.data()};
     }
 
     friend void serialization::read<Ownership>(storage::io::FileReader &reader,
@@ -358,7 +395,6 @@ template <storage::Ownership Ownership> class CellStorageImpl
                                                 const detail::CellStorageImpl<Ownership> &storage);
 
   private:
-    Vector<EdgeWeight> weights;
     Vector<NodeID> source_boundary;
     Vector<NodeID> destination_boundary;
     Vector<CellData> cells;

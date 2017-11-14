@@ -144,6 +144,10 @@ module.exports = function () {
         return this.nameWayHash[s.toString()] || this.nameWayHash[s.toString().split('').reverse().join('')];
     };
 
+    this.findRelationByName = (s) => {
+        return this.nameRelationHash[s.toString()] || this.nameRelationHash[s.toString().split('').reverse().join('')];
+    };
+
     this.makeOSMId = () => {
         this.osmID = this.osmID + 1;
         return this.osmID;
@@ -155,6 +159,7 @@ module.exports = function () {
         this.locationHash = {};
         this.shortcutsHash = {};
         this.nameWayHash = {};
+        this.nameRelationHash = {};
         this.osmID = 0;
     };
 
@@ -238,13 +243,13 @@ module.exports = function () {
         // a shallow copy of scenario parameters to avoid data inconsistency
         // if a cucumber timeout occurs during deferred jobs
         let p = {extractArgs: this.extractArgs, contractArgs: this.contractArgs,
-                 partitionArgs: this.partitionArgs, customizeArgs: this.customizeArgs,
-                 profileFile: this.profileFile, inputCacheFile: this.inputCacheFile,
-                 processedCacheFile: this.processedCacheFile, environment: this.environment};
+            partitionArgs: this.partitionArgs, customizeArgs: this.customizeArgs,
+            profileFile: this.profileFile, inputCacheFile: this.inputCacheFile,
+            processedCacheFile: this.processedCacheFile, environment: this.environment};
         let queue = d3.queue(1);
         queue.defer(this.extractData.bind(this), p);
-        queue.defer(this.contractData.bind(this), p);
         queue.defer(this.partitionData.bind(this), p);
+        queue.defer(this.contractData.bind(this), p);
         queue.defer(this.customizeData.bind(this), p);
         queue.awaitAll(callback);
     };

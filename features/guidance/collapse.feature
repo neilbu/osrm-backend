@@ -359,7 +359,7 @@ Feature: Collapse
             | a,g       | first,second,second | depart,turn left,arrive        | a,b,g     |
             | d,g       | first,second,second | depart,turn right,arrive       | d,e,g     |
             | g,f       | second,first,first  | depart,turn right,arrive       | g,e,f     |
-            | g,c       | second,first,first  | depart,end of road left,arrive | g,b,c     |
+            | g,c       | second,first,first  | depart,turn left,arrive        | g,e,c     |
 
     Scenario: Do not collapse turning roads
         Given the node map
@@ -399,7 +399,7 @@ Feature: Collapse
             | waypoints | route | turns         |
             | a,d       | ,     | depart,arrive |
 
-    # This scenario could be considered to require a `turn left`. The danger to create random/unwanted instructions 
+    # This scenario could be considered to require a `turn left`. The danger to create random/unwanted instructions
     # from a setting like this are just to big, though. Therefore I opted to use `depart,arrive` only
     Scenario: Crossing Bridge into Segregated Turn
         Given the node map
@@ -628,9 +628,9 @@ Feature: Collapse
             | cf    | secondary | bottom |
 
         When I route I should get
-            | waypoints | turns                                   | route               | locations |
-            | a,d       | depart,continue right,turn right,arrive | road,road,road,road | a,b,c,d   |
-            | d,a       | depart,continue left,turn left,arrive   | road,road,road,road | d,c,b,a   |
+            | waypoints | turns                                       | route               | locations |
+            | a,d       | depart,continue right,continue right,arrive | road,road,road,road | a,b,c,d   |
+            | d,a       | depart,continue left,continue left,arrive   | road,road,road,road | d,c,b,a   |
 
     Scenario: Forking before a turn
         Given the node map
@@ -690,9 +690,9 @@ Feature: Collapse
             | restriction | bc       | dc     | c        | no_right_turn |
 
         When I route I should get
-            | waypoints | route            | turns                   | locations |
-            | a,g       | road,cross,cross | depart,turn left,arrive | a,b,g     |
-            | a,e       | road,road        | depart,arrive           | a,e       |
+            | waypoints | route                 | turns                                        | locations |
+            | a,g       | road,road,cross,cross | depart,continue slight left,turn left,arrive | a,b,c,g   |
+            | a,e       | road,road             | depart,arrive                                | a,e       |
 
     Scenario: On-Off on Highway
         Given the node map
@@ -807,8 +807,8 @@ Feature: Collapse
             | di    |                                        | off  |
 
        When I route I should get
-            | waypoints | route          | turns                           | locations |
-            | a,e       | main,main,main | depart,use lane straight,arrive | a,c,e     |
+            | waypoints | route     | turns         | locations | lanes                                                                                                     |
+            | a,e       | main,main | depart,arrive | a,e       | ;left:false straight:false straight:true straight:false right:false;left:false straight:true right:false, |
 
     Scenario: But _do_ collapse UseLane step when lanes stay the same
         Given the node map
@@ -996,8 +996,8 @@ Feature: Collapse
             a . . b .'
                       ` d.
                         f e
-			"""
-			#Check collapse.detail for a similar case (shorter) that does not classify these turns as a sliproad anymore
+            """
+            #Check collapse.detail for a similar case (shorter) that does not classify these turns as a sliproad anymore
 
         And the ways
             | nodes | name  | oneway | highway   |
@@ -1016,9 +1016,9 @@ Feature: Collapse
 
         When I route I should get
             | waypoints | route                 | turns                                      | locations |
-			|       a,g | road,cross,cross	    | depart,fork left,arrive 			         | a,b,g 	 |
-     		|       a,e | road,road,road 		| depart,fork slight right,arrive 			 | a,b,e 	 |
-     		|       a,f | road,road,cross,cross | depart,fork slight right,turn right,arrive | a,b,d,f 	 |
+            |       a,g | road,road,cross,cross | depart,fork slight left,turn left,arrive   | a,b,c,g   |
+            |       a,e | road,road,road        | depart,fork slight right,arrive            | a,b,e     |
+            |       a,f | road,road,cross,cross | depart,fork slight right,turn right,arrive | a,b,d,f   |
 
 
     # http://www.openstreetmap.org/way/92415447 #3933
@@ -1055,3 +1055,46 @@ Feature: Collapse
        When I route I should get
          | waypoints | route                                            | turns                   | locations |
          | a,i       | President Avenue,Princes Highway,Princes Highway | depart,turn left,arrive | a,b,i     |
+
+
+    Scenario: Don't combine uturns
+        Given the node map
+            """
+              2   d
+            a - - b - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - c
+              1
+			"""
+
+        And the ways
+            | nodes | highway   |
+            | ab    | tertiary  |
+            | bc    | tertiary  |
+            | bd    | service   |
+
+        When I route I should get
+            | waypoints | bearings | route          | turns                                             | locations |
+            | 1,2       | 90 270   | ab,bd,bd,ab,ab | depart,turn left,continue uturn,turn right,arrive | _,b,d,b,_ |
+
+
+    # https://www.openstreetmap.org/#map=18/37.74844/-122.40275
+    Scenario: Don't use destinations as names
+        Given the node map
+            """
+            f - - - - e - - - - d
+                      |
+                      |
+                      |
+                      |
+                      |
+            a - - - - b - - - - c
+            """
+
+        And the ways
+            | nodes | highway       | name  | oneway | destination:ref |
+            | abc   | residential   | road  | yes    |                 |
+            | def   | motorway_link |       | yes    | US 101          |
+            | be    | residential   | cross | no     |                 |
+
+        When I route I should get
+            | waypoints | route        | turns                                |
+            | a,f       | road,cross,, | depart,turn left,on ramp left,arrive |

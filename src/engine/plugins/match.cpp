@@ -109,8 +109,7 @@ void filterCandidates(const std::vector<util::Coordinate> &coordinates,
     }
 }
 
-Status MatchPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                                  const RoutingAlgorithmsInterface &algorithms,
+Status MatchPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                                   const api::MatchParameters &parameters,
                                   util::json::Object &json_result) const
 {
@@ -120,6 +119,11 @@ Status MatchPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryData
                      "Map matching is not implemented for the chosen search algorithm.",
                      json_result);
     }
+
+    if (!CheckAlgorithms(parameters, algorithms, json_result))
+        return Status::Error;
+
+    const auto &facade = algorithms.GetFacade();
 
     BOOST_ASSERT(parameters.IsValid());
 
@@ -235,7 +239,7 @@ Status MatchPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryData
         // phantom nodes for possible uturns
         sub_routes[index] =
             algorithms.ShortestPathSearch(sub_routes[index].segment_end_coordinates, {false});
-        BOOST_ASSERT(sub_routes[index].shortest_path_length != INVALID_EDGE_WEIGHT);
+        BOOST_ASSERT(sub_routes[index].shortest_path_weight != INVALID_EDGE_WEIGHT);
     }
 
     api::MatchAPI match_api{facade, parameters, tidied};

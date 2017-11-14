@@ -7,13 +7,9 @@ namespace engine
 
 bool EngineConfig::IsValid() const
 {
-    const bool all_path_are_empty =
-        storage_config.ram_index_path.empty() && storage_config.file_index_path.empty() &&
-        storage_config.hsgr_data_path.empty() && storage_config.nodes_data_path.empty() &&
-        storage_config.edges_data_path.empty() && storage_config.core_data_path.empty() &&
-        storage_config.geometries_path.empty() && storage_config.timestamp_path.empty() &&
-        storage_config.datasource_names_path.empty() &&
-        storage_config.datasource_indexes_path.empty() && storage_config.names_data_path.empty();
+    // check whether a base_bath has been defined by verifying an empty extension
+    // leads to an empty path
+    const bool all_path_are_empty = storage_config.GetPath("").empty();
 
     const auto unlimited_or_more_than = [](const int v, const int limit) {
         return v == -1 || v > limit;
@@ -23,7 +19,8 @@ bool EngineConfig::IsValid() const
                               unlimited_or_more_than(max_locations_map_matching, 2) &&
                               unlimited_or_more_than(max_locations_trip, 2) &&
                               unlimited_or_more_than(max_locations_viaroute, 2) &&
-                              unlimited_or_more_than(max_results_nearest, 0);
+                              unlimited_or_more_than(max_results_nearest, 0) &&
+                              max_alternatives >= 0;
 
     return ((use_shared_memory && all_path_are_empty) || storage_config.IsValid()) && limits_valid;
 }

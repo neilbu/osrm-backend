@@ -1,12 +1,15 @@
 #include "server/server.hpp"
-#include "util/exception.hpp"
+#include "util/exception_utils.hpp"
 #include "util/log.hpp"
+#include "util/meminfo.hpp"
 #include "util/version.hpp"
 
 #include "osrm/engine_config.hpp"
+#include "osrm/exception.hpp"
 #include "osrm/osrm.hpp"
 #include "osrm/storage_config.hpp"
 
+#include <boost/algorithm/string/case_conv.hpp>
 #include <boost/any.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
@@ -49,15 +52,25 @@ const static unsigned INIT_OK_START_ENGINE = 0;
 const static unsigned INIT_OK_DO_NOT_START_ENGINE = 1;
 const static unsigned INIT_FAILED = -1;
 
-EngineConfig::Algorithm stringToAlgorithm(const std::string &algorithm)
+namespace osrm
 {
-    if (algorithm == "CH")
-        return EngineConfig::Algorithm::CH;
-    if (algorithm == "CoreCH")
-        return EngineConfig::Algorithm::CoreCH;
-    if (algorithm == "MLD")
-        return EngineConfig::Algorithm::MLD;
-    throw util::exception("Invalid algorithm name: " + algorithm);
+namespace engine
+{
+std::istream &operator>>(std::istream &in, EngineConfig::Algorithm &algorithm)
+{
+    std::string token;
+    in >> token;
+    boost::to_lower(token);
+
+    if (token == "ch" || token == "corech")
+        algorithm = EngineConfig::Algorithm::CH;
+    else if (token == "mld")
+        algorithm = EngineConfig::Algorithm::MLD;
+    else
+        throw util::RuntimeError(token, ErrorCode::UnknownAlgorithm, SOURCE_REF);
+    return in;
+}
+}
 }
 
 // generate boost::program_options object for the routing part
@@ -66,24 +79,23 @@ inline unsigned generateServerProgramOptions(const int argc,
                                              boost::filesystem::path &base_path,
                                              std::string &ip_address,
                                              int &ip_port,
-                                             int &requested_num_threads,
-                                             bool &use_shared_memory,
-                                             std::string &algorithm,
                                              bool &trial,
-                                             int &max_locations_trip,
-                                             int &max_locations_viaroute,
-                                             int &max_locations_distance_table,
-                                             int &max_locations_map_matching,
-                                             int &max_results_nearest)
+                                             EngineConfig &config,
+                                             int &requested_thread_num)
 {
     using boost::program_options::value;
     using boost::filesystem::path;
 
+    const auto hardware_threads = std::max<int>(1, std::thread::hardware_concurrency());
+
     // declare a group of options that will be allowed only on command line
     boost::program_options::options_description generic_options("Options");
-    generic_options.add_options()                                         //
-        ("version,v", "Show version")("help,h", "Show this help message") //
-        ("trial", value<bool>(&trial)->implicit_value(true), "Quit after initialization");
+    generic_options.add_options() //
+        ("version,v", "Show version")("help,h", "Show this help message")(
+            "verbosity,l",
+            boost::program_options::value<std::string>(&config.verbosity)->default_value("INFO"),
+            std::string("Log verbosity level: " + util::LogPolicy::GetLevels()).c_str())(
+            "trial", value<bool>(&trial)->implicit_value(true), "Quit after initialization");
 
     // declare a group of options that will be allowed on command line
     boost::program_options::options_description config_options("Configuration");
@@ -95,29 +107,33 @@ inline unsigned generateServerProgramOptions(const int argc,
          value<int>(&ip_port)->default_value(5000),
          "TCP/IP port") //
         ("threads,t",
-         value<int>(&requested_num_threads)->default_value(8),
+         value<int>(&requested_thread_num)->default_value(hardware_threads),
          "Number of threads to use") //
         ("shared-memory,s",
-         value<bool>(&use_shared_memory)->implicit_value(true)->default_value(false),
+         value<bool>(&config.use_shared_memory)->implicit_value(true)->default_value(false),
          "Load data from shared memory") //
         ("algorithm,a",
-         value<std::string>(&algorithm)->default_value("CH"),
+         value<EngineConfig::Algorithm>(&config.algorithm)
+             ->default_value(EngineConfig::Algorithm::CH, "CH"),
          "Algorithm to use for the data. Can be CH, CoreCH, MLD.") //
         ("max-viaroute-size",
-         value<int>(&max_locations_viaroute)->default_value(500),
+         value<int>(&config.max_locations_viaroute)->default_value(500),
          "Max. locations supported in viaroute query") //
         ("max-trip-size",
-         value<int>(&max_locations_trip)->default_value(100),
+         value<int>(&config.max_locations_trip)->default_value(100),
          "Max. locations supported in trip query") //
         ("max-table-size",
-         value<int>(&max_locations_distance_table)->default_value(-1),
+         value<int>(&config.max_locations_distance_table)->default_value(-1),
          "Max. locations supported in distance table query") //
         ("max-matching-size",
-         value<int>(&max_locations_map_matching)->default_value(100),
+         value<int>(&config.max_locations_map_matching)->default_value(100),
          "Max. locations supported in map matching query") //
         ("max-nearest-size",
-         value<int>(&max_results_nearest)->default_value(100),
-         "Max. results supported in nearest query");
+         value<int>(&config.max_results_nearest)->default_value(100),
+         "Max. results supported in nearest query") //
+        ("max-alternatives",
+         value<int>(&config.max_alternatives)->default_value(3),
+         "Max. number of alternatives supported in the MLD route query");
 
     // hidden options, will be allowed on command line, but will not be shown to the user
     boost::program_options::options_description hidden_options("Hidden options");
@@ -167,18 +183,21 @@ inline unsigned generateServerProgramOptions(const int argc,
 
     boost::program_options::notify(option_variables);
 
-    if (!use_shared_memory && option_variables.count("base"))
+    if (!config.use_shared_memory && option_variables.count("base"))
     {
         return INIT_OK_START_ENGINE;
     }
-    else if (use_shared_memory && !option_variables.count("base"))
+    else if (config.use_shared_memory && !option_variables.count("base"))
     {
         return INIT_OK_START_ENGINE;
     }
-    else if (use_shared_memory && option_variables.count("base"))
+    else if (config.use_shared_memory && option_variables.count("base"))
     {
         util::Log(logWARNING) << "Shared memory settings conflict with path settings.";
     }
+
+    // Adjust number of threads to hardware concurrency
+    requested_thread_num = std::min(hardware_threads, requested_thread_num);
 
     std::cout << visible_options;
     return INIT_OK_DO_NOT_START_ENGINE;
@@ -190,25 +209,14 @@ int main(int argc, const char *argv[]) try
 
     bool trial_run = false;
     std::string ip_address;
-    int ip_port, requested_thread_num;
+    int ip_port;
 
     EngineConfig config;
     boost::filesystem::path base_path;
-    std::string algorithm;
-    const unsigned init_result = generateServerProgramOptions(argc,
-                                                              argv,
-                                                              base_path,
-                                                              ip_address,
-                                                              ip_port,
-                                                              requested_thread_num,
-                                                              config.use_shared_memory,
-                                                              algorithm,
-                                                              trial_run,
-                                                              config.max_locations_trip,
-                                                              config.max_locations_viaroute,
-                                                              config.max_locations_distance_table,
-                                                              config.max_locations_map_matching,
-                                                              config.max_results_nearest);
+
+    int requested_thread_num = 1;
+    const unsigned init_result = generateServerProgramOptions(
+        argc, argv, base_path, ip_address, ip_port, trial_run, config, requested_thread_num);
     if (init_result == INIT_OK_DO_NOT_START_ENGINE)
     {
         return EXIT_SUCCESS;
@@ -217,9 +225,17 @@ int main(int argc, const char *argv[]) try
     {
         return EXIT_FAILURE;
     }
+
+    util::LogPolicy::GetInstance().SetLevel(config.verbosity);
+
     if (!base_path.empty())
     {
         config.storage_config = storage::StorageConfig(base_path);
+    }
+    if (!config.use_shared_memory && !config.storage_config.IsValid())
+    {
+        util::Log(logERROR) << "Required files are missing, cannot continue";
+        return EXIT_FAILURE;
     }
     if (!config.IsValid())
     {
@@ -227,62 +243,8 @@ int main(int argc, const char *argv[]) try
         {
             util::Log(logWARNING) << "Path settings and shared memory conflicts.";
         }
-        else
-        {
-            if (!boost::filesystem::is_regular_file(config.storage_config.ram_index_path))
-            {
-                util::Log(logWARNING) << config.storage_config.ram_index_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.file_index_path))
-            {
-                util::Log(logWARNING) << config.storage_config.file_index_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.hsgr_data_path))
-            {
-                util::Log(logWARNING) << config.storage_config.hsgr_data_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.nodes_data_path))
-            {
-                util::Log(logWARNING) << config.storage_config.nodes_data_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.edges_data_path))
-            {
-                util::Log(logWARNING) << config.storage_config.edges_data_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.core_data_path))
-            {
-                util::Log(logWARNING) << config.storage_config.core_data_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.geometries_path))
-            {
-                util::Log(logWARNING) << config.storage_config.geometries_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.timestamp_path))
-            {
-                util::Log(logWARNING) << config.storage_config.timestamp_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.datasource_names_path))
-            {
-                util::Log(logWARNING) << config.storage_config.datasource_names_path
-                                      << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.datasource_indexes_path))
-            {
-                util::Log(logWARNING) << config.storage_config.datasource_indexes_path
-                                      << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.names_data_path))
-            {
-                util::Log(logWARNING) << config.storage_config.names_data_path << " is not found";
-            }
-            if (!boost::filesystem::is_regular_file(config.storage_config.properties_path))
-            {
-                util::Log(logWARNING) << config.storage_config.properties_path << " is not found";
-            }
-        }
         return EXIT_FAILURE;
     }
-    config.algorithm = stringToAlgorithm(algorithm);
 
     util::Log() << "starting up engines, " << OSRM_VERSION;
 
@@ -303,8 +265,8 @@ int main(int argc, const char *argv[]) try
     pthread_sigmask(SIG_BLOCK, &new_mask, &old_mask);
 #endif
 
-    auto routing_server = server::Server::CreateServer(ip_address, ip_port, requested_thread_num);
     auto service_handler = std::make_unique<server::ServiceHandler>(config);
+    auto routing_server = server::Server::CreateServer(ip_address, ip_port, requested_thread_num);
 
     routing_server->RegisterServiceHandler(std::move(service_handler));
 
@@ -363,8 +325,14 @@ int main(int argc, const char *argv[]) try
     routing_server.reset();
     util::Log() << "shutdown completed";
 }
+catch (const osrm::RuntimeError &e)
+{
+    util::Log(logERROR) << e.what();
+    return e.GetCode();
+}
 catch (const std::bad_alloc &e)
 {
+    util::DumpMemoryStats();
     util::Log(logWARNING) << "[exception] " << e.what();
     util::Log(logWARNING) << "Please provide more memory or consider using a larger swapfile";
     return EXIT_FAILURE;

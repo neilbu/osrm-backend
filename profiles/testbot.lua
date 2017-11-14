@@ -1,44 +1,43 @@
-api_version = 1
 -- Testbot profile
 
 -- Moves at fixed, well-known speeds, practical for testing speed and travel times:
-
 -- Primary road:  36km/h = 36000m/3600s = 100m/10s
 -- Secondary road:  18km/h = 18000m/3600s = 100m/20s
 -- Tertiary road:  12km/h = 12000m/3600s = 100m/30s
 
-speed_profile = {
-  ["primary"] = 36,
-  ["secondary"] = 18,
-  ["tertiary"] = 12,
-  ["steps"] = 6,
-  ["default"] = 24
-}
+api_version = 3
 
--- these settings are read directly by osrm
+function setup()
+  return {
+    properties = {
+      continue_straight_at_waypoint = true,
+      max_speed_for_map_matching    = 30/3.6, --km -> m/s
+      weight_name                   = 'duration',
+      process_call_tagless_node     = false,
+      uturn_penalty                 = 20,
+      traffic_light_penalty         = 7,     -- seconds
+      use_turn_restrictions         = true
+    },
 
-properties.continue_straight_at_waypoint = true
-properties.use_turn_restrictions         = true
-properties.max_speed_for_map_matching    = 30/3.6 --km -> m/s
-properties.weight_name                   = 'duration'
+    classes = {"motorway", "toll", "TooWords2"},
 
-local uturn_penalty                      = 20
-local traffic_light_penalty              = 7     -- seconds
+    excludable = {
+        {["motorway"] = true},
+        {["toll"] = true},
+        {["motorway"] = true, ["toll"] = true}
+    },
 
-function limit_speed(speed, limits)
-  -- don't use ipairs(), since it stops at the first nil value
-  for i=1, #limits do
-    limit = limits[i]
-    if limit ~= nil and limit > 0 then
-      if limit < speed then
-        return limit        -- stop at first speedlimit that's smaller than speed
-      end
-    end
-  end
-  return speed
+    default_speed  = 24,
+    speeds = {
+      primary = 36,
+      secondary = 18,
+      tertiary = 12,
+      steps = 6,
+    }
+  }
 end
 
-function node_function (node, result)
+function process_node (profile, node, result)
   local traffic_signal = node:get_value_by_key("highway")
 
   if traffic_signal and traffic_signal == "traffic_signals" then
@@ -47,8 +46,9 @@ function node_function (node, result)
   end
 end
 
-function way_function (way, result)
+function process_way (profile, way, result)
   local highway = way:get_value_by_key("highway")
+  local toll = way:get_value_by_key("toll")
   local name = way:get_value_by_key("name")
   local oneway = way:get_value_by_key("oneway")
   local route = way:get_value_by_key("route")
@@ -70,7 +70,7 @@ function way_function (way, result)
     result.forward_mode = mode.route
     result.backward_mode = mode.route
   else
-    local speed_forw = speed_profile[highway] or speed_profile['default']
+    local speed_forw = profile.speeds[highway] or profile.default_speed
     local speed_back = speed_forw
 
     if highway == "river" then
@@ -112,17 +112,34 @@ function way_function (way, result)
     result.backward_mode = mode.inaccessible
   end
 
+  if highway == 'motorway' then
+      result.forward_classes["motorway"] = true
+      result.backward_classes["motorway"] = true
+  end
+
+  if toll == "yes" then
+      result.forward_classes["toll"] = true
+      result.backward_classes["toll"] = true
+  end
+
   if junction == 'roundabout' then
     result.roundabout = true
   end
 end
 
-function turn_function (turn)
+function process_turn (profile, turn)
   if turn.direction_modifier == direction_modifier.uturn then
-    turn.duration = uturn_penalty
-    turn.weight = uturn_penalty
+    turn.duration = profile.properties.uturn_penalty
+    turn.weight = profile.properties.uturn_penalty
   end
   if turn.has_traffic_light then
-     turn.duration = turn.duration + traffic_light_penalty
+     turn.duration = turn.duration + profile.properties.traffic_light_penalty
   end
 end
+
+return {
+  setup = setup,
+  process_way = process_way,
+  process_node = process_node,
+  process_turn = process_turn
+}

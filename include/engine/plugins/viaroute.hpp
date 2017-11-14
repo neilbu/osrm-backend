@@ -3,10 +3,9 @@
 
 #include "engine/plugins/plugin_base.hpp"
 
-#include "engine/api/route_api.hpp"
-#include "engine/datafacade/datafacade_base.hpp"
+#include "engine/api/route_parameters.hpp"
 #include "engine/routing_algorithms.hpp"
-#include "engine/search_engine_data.hpp"
+
 #include "util/json_container.hpp"
 
 #include <cstdlib>
@@ -27,12 +26,12 @@ class ViaRoutePlugin final : public BasePlugin
 {
   private:
     const int max_locations_viaroute;
+    const int max_alternatives;
 
   public:
-    explicit ViaRoutePlugin(int max_locations_viaroute);
+    explicit ViaRoutePlugin(int max_locations_viaroute, int max_alternatives);
 
-    Status HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                         const RoutingAlgorithmsInterface &algorithms,
+    Status HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                          const api::RouteParameters &route_parameters,
                          util::json::Object &json_result) const;
 };

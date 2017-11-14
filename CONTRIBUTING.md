@@ -1,8 +1,12 @@
+# Everyone
+
+Please take some time to review our [code of conduct](CODE_OF_CONDUCT.md) to help guide your interactions with others on this project.
+
 # User
 
 Before you open a new issue, please search for older ones that cover the same issue.
 In general "me too" comments/issues are frowned upon.
-You can add a :+1: emoji to the issue if you want to express interest in this.
+You can add a :+1: emoji reaction to the issue if you want to express interest in this.
 
 # Developer
 
@@ -18,7 +22,7 @@ if [ x"$remote" = xorigin  ] ; then
         echo "Rejected push to $remote/master" ; exit 1
     fi
 
-    ./scripts/format.sh
+    ./scripts/format.sh && ./scripts/error_on_dirty.sh
     if [ $? -ne 0 ] ; then
         echo "Unstaged format changes" ; exit 1
     fi

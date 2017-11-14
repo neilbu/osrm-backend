@@ -1,16 +1,14 @@
 @routing @car @weight
 Feature: Car - weights
 
-    Background: Use specific speeds
-        Given the profile "car"
-
     Scenario: Only routes down service road when that's the destination
-        Given the node map
+        Given the profile "car"
+        And the node map
             """
             a--b--c
-               |
-               d
-               |
+               |  |
+               d  |
+               |  |
             e--f--g
             """
         And the ways
@@ -21,11 +19,12 @@ Feature: Car - weights
             | bdf   | service     |
         When I route I should get
             | from | to | route          | speed   | weight |
-            | a    | e  | abc,cg,efg,efg | 28 km/h | 126.6  |
+            | a    | e  | abc,cg,efg,efg | 29 km/h | 122.4  |
             | a    | d  | abc,bdf,bdf    | 18 km/h | 71.7   |
 
     Scenario: Does not jump off the highway to go down service road
-        Given the node map
+        Given the profile "car"
+        And the node map
             """
             a
             |
@@ -51,7 +50,6 @@ Feature: Car - weights
             | cd    | primary | yes    |
             | be    | service | yes    |
             | ec    | service | yes    |
-        And the extract extra arguments "--generate-edge-lookup"
         And the contract extra arguments "--segment-speed-file {speeds_file}"
         And the customize extra arguments "--segment-speed-file {speeds_file}"
         And the speed file
@@ -61,13 +59,12 @@ Feature: Car - weights
         When I route I should get
             | from | to | route       | speed   | weight |
             | a    | d  | ab,bc,cd,cd | 65 km/h | 44.4   |
-            | a    | e  | ab,be,be    | 14 km/h | 112    |
+            | a    | e  | ab,be,be    | 14 km/h | 111.8  |
 
     Scenario: Distance weights
-        Given the profile file "car" extended with
+        Given the profile file "car" initialized with
         """
-        api_version = 1
-        properties.weight_name = 'distance'
+        profile.properties.weight_name = 'distance'
         """
 
         Given the node map

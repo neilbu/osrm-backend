@@ -21,12 +21,7 @@ Feature: Bike - Handle ferry routes
         When I route I should get
             | from | to | route           |
             | a    | g  | abc,cde,efg,efg |
-            | b    | f  | abc,cde,efg,efg |
-            | e    | c  | cde,cde         |
-            | e    | b  | cde,abc,abc     |
-            | e    | a  | cde,abc,abc     |
             | c    | e  | cde,cde         |
-            | c    | f  | cde,efg,efg     |
             | c    | g  | cde,efg,efg     |
 
     Scenario: Bike - Ferry duration, single node
@@ -53,8 +48,7 @@ Feature: Bike - Handle ferry routes
     Scenario: Bike - Ferry duration, multiple nodes
         Given the node map
             """
-            x         y
-              a b c d
+            x a b c d y
             """
 
         And the ways

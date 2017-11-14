@@ -15,7 +15,7 @@ GET /{service}/{version}/{profile}/{coordinates}[.{format}]?option=value&option=
 | `service` | One of the following values: [`route`](#route-service), [`nearest`](#nearest-service), [`table`](#table-service), [`match`](#match-service), [`trip`](#trip-service), [`tile`](#tile-service) |
 | `version` | Version of the protocol implemented by the service. `v1` for all OSRM 5.x installations |
 | `profile` | Mode of transportation, is determined statically by the Lua profile that is used to prepare the data using `osrm-extract`. Typically `car`, `bike` or `foot` if using one of the supplied profiles. |
-| `coordinates`| String of format `{longitude},{latitude};{longitude},{latitude}[;{longitude},{latitude} ...]` or `polyline({polyline})`. |
+| `coordinates`| String of format `{longitude},{latitude};{longitude},{latitude}[;{longitude},{latitude} ...]` or `polyline({polyline}) or polyline6({polyline6})`. |
 | `format`| Only `json` is supported at the moment. This parameter is optional and defaults to `json`. |
 
 Passing any `option=value` is optional. `polyline` follows Google's polyline format with precision 5 by default and can be generated using [this package](https://www.npmjs.com/package/polyline).
@@ -30,6 +30,8 @@ To pass parameters to each location some options support an array like encoding:
 |radiuses        |`{radius};{radius}[;{radius} ...]`                      |Limits the search to given radius in meters.                                                           |
 |generate\_hints |`true` (default), `false`                               |Adds a Hint to the response which can be used in subsequent requests, see `hints` parameter.           |
 |hints           |`{hint};{hint}[;{hint} ...]`                            |Hint from previous request to derive position in street network.                                       |
+|approaches      |`{approach};{approach}[;{approach} ...]`                |Keep waypoints on curb side.                                                                           |
+|exclude         |`{class}[,{class}]`                                     |Additive list of classes to avoid, order does not matter.                                              |
 
 Where the elements follow the following format:
 
@@ -38,12 +40,14 @@ Where the elements follow the following format:
 |bearing     |`{value},{range}` `integer 0 .. 360,integer 0 .. 180`   |
 |radius      |`double >= 0` or `unlimited` (default)                  |
 |hint        |Base64 `string`                                         |
+|approach    |`curb` or `unrestricted` (default)                      |
+|class       |A class name determined by the profile or `none`.       |
 
 ```
 {option}={element};{element}[;{element} ... ]
 ```
 
-The number of elements must match exactly the number of locations. If you don't want to pass a value but instead use the default you can pass an empty `element`.
+The number of elements must match exactly the number of locations (except for `generate_hints` and `exclude`). If you don't want to pass a value but instead use the default you can pass an empty `element`.
 
 Example: 2nd location use the default value for `option`:
 
@@ -56,6 +60,9 @@ Example: 2nd location use the default value for `option`:
 ```curl
 # Query on Berlin with three coordinates:
 curl 'http://router.project-osrm.org/route/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219?overview=false'
+
+# Query on Berlin excluding the usage of motorways:
+curl 'http://router.project-osrm.org/route/v1/driving/13.388860,52.517037;13.397634,52.529407?exclude=motorway'
 
 # Using polyline:
 curl 'http://router.project-osrm.org/route/v1/driving/polyline(ofp_Ik_vpAilAyu@te@g`E)?overview=false'
@@ -163,21 +170,21 @@ curl 'http://router.project-osrm.org/nearest/v1/driving/13.388860,52.517037?numb
 Finds the fastest route between coordinates in the supplied order.
 
 ```endpoint
-GET /route/v1/{profile}/{coordinates}?alternatives={true|false}&steps={true|false}&geometries={polyline|polyline6|geojson}&overview={full|simplified|false}&annotations={true|false}
+GET /route/v1/{profile}/{coordinates}?alternatives={true|false|number}&steps={true|false}&geometries={polyline|polyline6|geojson}&overview={full|simplified|false}&annotations={true|false}
 ```
 
 In addition to the [general options](#general-options) the following options are supported for this service:
 
 |Option      |Values                                       |Description                                                                    |
 |------------|---------------------------------------------|-------------------------------------------------------------------------------|
-|alternatives|`true`, `false` (default)                    |Search for alternative routes and return as well.\*                            |
-|steps       |`true`, `false` (default)                    |Return route steps for each route leg                                          |
+|alternatives|`true`, `false` (default), or Number         |Search for alternative routes. Passing a number `alternatives=n` searches for up to `n` alternative routes.\*                            |
+|steps       |`true`, `false` (default)                    |Returned route steps for each route leg                                        |
 |annotations |`true`, `false` (default), `nodes`, `distance`, `duration`, `datasources`, `weight`, `speed`  |Returns additional metadata for each coordinate along the route geometry.      |
 |geometries  |`polyline` (default), `polyline6`, `geojson` |Returned route geometry format (influences overview and per step)              |
 |overview    |`simplified` (default), `full`, `false`      |Add overview geometry either full, simplified according to highest zoom level it could be display on, or not at all.|
 |continue\_straight |`default` (default), `true`, `false` |Forces the route to keep going straight at waypoints constraining uturns there even if it would be faster. Default value depends on the profile. |
 
-\* Please note that even if an alternative route is requested, a result cannot be guaranteed.
+\* Please note that even if alternative routes are requested, a result cannot be guaranteed.
 
 **Response**
 
@@ -273,7 +280,7 @@ In addition to the [general options](#general-options) the following options are
 
 |Option      |Values                                          |Description                                                                               |
 |------------|------------------------------------------------|------------------------------------------------------------------------------------------|
-|steps       |`true`, `false` (default)                       |Return route steps for each route                                                         |
+|steps       |`true`, `false` (default)                       |Returned route steps for each route                                                       |
 |geometries  |`polyline` (default), `polyline6`, `geojson`    |Returned route geometry format (influences overview and per step)                         |
 |annotations |`true`, `false` (default), `nodes`, `distance`, `duration`, `datasources`, `weight`, `speed`  |Returns additional metadata for each coordinate along the route geometry.                 |
 |overview    |`simplified` (default), `full`, `false`         |Add overview geometry either full, simplified according to highest zoom level it could be display on, or not at all.|
@@ -300,7 +307,7 @@ The area to search is chosen such that the correct candidate should be considere
   Each `Waypoint` object has the following additional properties:
   - `matchings_index`: Index to the `Route` object in `matchings` the sub-trace was matched to.
   - `waypoint_index`: Index of the waypoint inside the matched route.
-  - `alternatives_count`: number of alternative routes leading to the destination from this trace point. 0 means there are no other routes reaching destination. Greater values mean that there are different routes available and different route can be selected if you provide more coordinates.
+  - `alternatives_count`: Number of probable alternative matchings for this trace point. A value of zero indicate that this point was matched unambiguously. Split the trace at these points for incremental map matching.
 - `matchings`: An array of `Route` objects that assemble the trace. Each `Route` object has the following additional properties:
   - `confidence`: Confidence of the matching. `float` value between 0 and 1. 1 is very confident that the matching is correct.
 
@@ -326,10 +333,10 @@ In addition to the [general options](#general-options) the following options are
 
 |Option      |Values                                          |Description                                                                |
 |------------|------------------------------------------------|---------------------------------------------------------------------------|
-|roundtrip   |`true` (default), `false`                       |Return route is a roundtrip (route returns to first location)              |
-|source      |`any` (default), `first`                        |Return route starts at `any` or `first` coordinate                         |
-|destination |`any` (default), `last`                         |Return route ends at `any` or `last` coordinate                            |
-|steps       |`true`, `false` (default)                       |Return route instructions for each trip                                    |
+|roundtrip   |`true` (default), `false`                       |Returned route is a roundtrip (route returns to first location)            |
+|source      |`any` (default), `first`                        |Returned route starts at `any` or `first` coordinate                       |
+|destination |`any` (default), `last`                         |Returned route ends at `any` or `last` coordinate                          |
+|steps       |`true`, `false` (default)                       |Returned route instructions for each trip                                  |
 |annotations |`true`, `false` (default), `nodes`, `distance`, `duration`, `datasources`, `weight`, `speed` |Returns additional metadata for each coordinate along the route geometry.  |
 |geometries  |`polyline` (default), `polyline6`, `geojson`    |Returned route geometry format (influences overview and per step)          |
 |overview    |`simplified` (default), `full`, `false`         |Add overview geometry either full, simplified according to highest zoom level it could be display on, or not at all.|
@@ -417,8 +424,10 @@ Vector tiles contain two layers:
 | `speed`      | `integer` | the speed on that road segment, in km/h  |
 | `is_small`   | `boolean` | whether this segment belongs to a small (< 1000 node) [strongly connected component](https://en.wikipedia.org/wiki/Strongly_connected_component) |
 | `datasource` | `string`  | the source for the speed value (normally `lua profile` unless you're using the [traffic update feature](https://github.com/Project-OSRM/osrm-backend/wiki/Traffic), in which case it contains the stem of the filename that supplied the speed value for this segment |
-| `duration`   | `float`   | how long this segment takes to traverse, in seconds |
+| `duration`   | `float`   | how long this segment takes to traverse, in seconds.  This value is to calculate the total route ETA. |
+| `weight  `   | `integer` | how long this segment takes to traverse, in units (may differ from `duration` when artificial biasing is applied in the Lua profiles).  ACTUAL ROUTING USES THIS VALUE. |
 | `name`       | `string`  | the name of the road this segment belongs to |
+| `rate`       | `float`   | the value of `length/weight` - analagous to `speed`, but using the `weight` value rather than `duration`, rounded to the nearest integer |
 
 `turns` layer:
 
@@ -427,6 +436,9 @@ Vector tiles contain two layers:
 | `bearing_in` | `integer` | the absolute bearing that approaches the intersection.  -180 to +180, 0 = North, 90 = East |
 | `turn_angle` | `integer` | the angle of the turn, relative to the `bearing_in`.  -180 to +180, 0 = straight ahead, 90 = 90-degrees to the right |
 | `cost`       | `float`   | the time we think it takes to make that turn, in seconds.  May be negative, depending on how the data model is constructed (some turns get a "bonus"). |
+| `weight`     | `float`   | the weight we think it takes to make that turn.  May be negative, depending on how the data model is constructed (some turns get a "bonus"). ACTUAL ROUTING USES THIS VALUE |
+| `type`       | `string`  | the type of this turn - values like `turn`, `continue`, etc.  See the `StepManeuver` for a partial list, this field also exposes internal turn types that are never returned with an API response |
+| `modifier`   | `string`  | the direction modifier of the turn (`left`, `sharp left`, etc) |
 
 
 ## Result objects
@@ -534,10 +546,10 @@ Annotation of the whole route leg with fine-grained information about each segme
 **Properties**
 
 - `distance`: The distance, in metres, between each pair of coordinates
-- `duration`: The duration between each pair of coordinates, in seconds
+- `duration`: The duration between each pair of coordinates, in seconds.  Does not include the duration of any turns.
 - `datasources`: The index of the datasource for the speed between each pair of coordinates. `0` is the default profile, other values are supplied via `--segment-speed-file` to `osrm-contract`
 - `nodes`: The OSM node ID for each coordinate along the route, excluding the first/last user-supplied coordinates
-- `weight`: The weights between each pair of coordinates
+- `weight`: The weights between each pair of coordinates.  Does not include any turn costs.
 - `speed`: Convenience field, calculation of `distance / duration` rounded to one decimal place
 
 #### Example
@@ -576,11 +588,13 @@ step.
 - `ref`: A reference number or code for the way. Optionally included, if ref data is available for the given way.
 - `pronunciation`: The pronunciation hint of the way name. Will be `undefined` if there is no pronunciation hit.
 - `destinations`: The destinations of the way. Will be `undefined` if there are no destinations.
+- `exits`: The exit numbers or names of the way. Will be `undefined` if there are no exit numbers or names.
 - `mode`: A string signifying the mode of transportation.
 - `maneuver`: A `StepManeuver` object representing the maneuver.
 - `intersections`: A list of `Intersection` objects that are passed along the segment, the very first belonging to the StepManeuver
 - `rotary_name`: The name for the rotary. Optionally included, if the step is a rotary and a rotary name is available.
 - `rotary_pronunciation`: The pronunciation hint of the rotary name. Optionally included, if the step is a rotary and a rotary pronunciation is available.
+- `driving_side`: The legal driving side at the location for this step.  Either `left` or `right`.
 
 #### Example
 
@@ -649,12 +663,14 @@ step.
 | `off ramp`       | take a ramp to exit a highway (direction given my `modifier`)  |
 | `fork`           | take the left/right side at a fork depending on `modifier`   |
 | `end of road`    | road ends in a T intersection turn in direction of `modifier`|
-| `use lane`       | going straight on a specific lane                            |
+| `use lane`       | **Deprecated** replaced by lanes on all intersection entries |
 | `continue`       | Turn in direction of `modifier` to stay on the same road     |
-| `roundabout`     | traverse roundabout, has additional property `exit` with NR if the roundabout is left. The modifier specifies the direction of entering the roundabout. |
+| `roundabout`     | traverse roundabout, if the route leaves the roundabout there will be an additional property `exit` for exit counting. The modifier specifies the direction of entering the roundabout. |
 | `rotary`         | a traffic circle. While very similar to a larger version of a roundabout, it does not necessarily follow roundabout rules for right of way. It can offer `rotary_name` and/or `rotary_pronunciation` parameters (located in the RouteStep object) in addition to the `exit` parameter (located on the StepManeuver object).  |
 | `roundabout turn`| Describes a turn at a small roundabout that should be treated as normal turn. The `modifier` indicates the turn direciton. Example instruction: `At the roundabout turn left`. |
-| `notification`   | not an actual turn but a change in the driving conditions. For example the travel mode.  If the road takes a turn itself, the `modifier` describes the direction |
+| `notification`   | not an actual turn but a change in the driving conditions. For example the travel mode or classes. If the road takes a turn itself, the `modifier` describes the direction |
+| `exit roundabout`| Describes a maneuver exiting a roundabout (usually preceeded by a `roundabout` instruction) |
+| `exit rotary`    | Describes the maneuver exiting a rotary (large named roundabout) |
 
   Please note that even though there are `new name` and `notification` instructions, the `mode` and `name` can change
   between all instructions. They only offer a fallback in case nothing else is to report.
@@ -727,6 +743,7 @@ location of the StepManeuver. Further intersections are listed for every cross-w
 
 - `location`: A `[longitude, latitude]` pair describing the location of the turn.
 - `bearings`: A list of bearing values (e.g. [0,90,180,270]) that are available at the intersection. The bearings describe all available roads at the intersection.  Values are between 0-359 (0=true north)
+- `classes`: An array of strings signifying the classes (as specified in the profile) of the road exiting the intersection.
 - `entry`: A list of entry flags, corresponding in a 1:1 relationship to the bearings. A value of `true` indicates that the respective road could be entered on a valid route.
   `false` indicates that the turn onto the respective road would violate a restriction.
 - `in`: index into bearings/entry array. Used to calculate the bearing just before the turn. Namely, the clockwise angle from true north to the
@@ -745,6 +762,7 @@ location of the StepManeuver. Further intersections are listed for every cross-w
     "out":2,
     "bearings":[60,150,240,330],
     "entry":["false","true","true","true"],
+    "classes": ["toll", "restricted"],
     "lanes":{
         "indications": ["left", "straight"],
         "valid": "false"

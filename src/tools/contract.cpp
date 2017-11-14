@@ -1,8 +1,9 @@
-#include "contractor/contractor.hpp"
-#include "contractor/contractor_config.hpp"
-#include "extractor/profile_properties.hpp"
 #include "storage/io.hpp"
+#include "osrm/contractor.hpp"
+#include "osrm/contractor_config.hpp"
+#include "osrm/exception.hpp"
 #include "util/log.hpp"
+#include "util/timezones.hpp"
 #include "util/version.hpp"
 
 #include <boost/filesystem.hpp>
@@ -27,11 +28,17 @@ enum class return_code : unsigned
     exit
 };
 
-return_code parseArguments(int argc, char *argv[], contractor::ContractorConfig &contractor_config)
+return_code parseArguments(int argc,
+                           char *argv[],
+                           std::string &verbosity,
+                           contractor::ContractorConfig &contractor_config)
 {
     // declare a group of options that will be allowed only on command line
     boost::program_options::options_description generic_options("Options");
-    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message");
+    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message")(
+        "verbosity,l",
+        boost::program_options::value<std::string>(&verbosity)->default_value("INFO"),
+        std::string("Log verbosity level: " + util::LogPolicy::GetLevels()).c_str());
 
     // declare a group of options that will be allowed on command line
     boost::program_options::options_description config_options("Configuration");
@@ -42,33 +49,45 @@ return_code parseArguments(int argc, char *argv[], contractor::ContractorConfig 
         "Number of threads to use")(
         "core,k",
         boost::program_options::value<double>(&contractor_config.core_factor)->default_value(1.0),
-        "Percentage of the graph (in vertices) to contract [0..1]")(
-        "segment-speed-file",
-        boost::program_options::value<std::vector<std::string>>(
-            &contractor_config.updater_config.segment_speed_lookup_paths)
-            ->composing(),
-        "Lookup files containing nodeA, nodeB, speed data to adjust edge weights")(
+        "DEPRECATED: Will always be 1.0. Percentage of the graph (in vertices) to contract "
+        "[0..1].")("segment-speed-file",
+                   boost::program_options::value<std::vector<std::string>>(
+                       &contractor_config.updater_config.segment_speed_lookup_paths)
+                       ->composing(),
+                   "Lookup files containing nodeA, nodeB, speed data to adjust edge weights")(
         "turn-penalty-file",
         boost::program_options::value<std::vector<std::string>>(
             &contractor_config.updater_config.turn_penalty_lookup_paths)
             ->composing(),
         "Lookup files containing from_, to_, via_nodes, and turn penalties to adjust turn weights")(
         "level-cache,o",
-        boost::program_options::value<bool>(&contractor_config.use_cached_priority)
+        boost::program_options::bool_switch(&contractor_config.use_cached_priority)
             ->default_value(false),
-        "Use .level file to retain the contaction level for each node from the last run.")(
+        "DEPRECATED: Will always be false. Use .level file to retain the contraction level for "
+        "each "
+        "node from the last run.")(
         "edge-weight-updates-over-factor",
         boost::program_options::value<double>(
             &contractor_config.updater_config.log_edge_updates_factor)
             ->default_value(0.0),
         "Use with `--segment-speed-file`. Provide an `x` factor, by which Extractor will log edge "
-        "weights updated by more than this factor");
+        "weights updated by more than this factor")(
+        "parse-conditionals-from-now",
+        boost::program_options::value<std::time_t>(&contractor_config.updater_config.valid_now)
+            ->default_value(0),
+        "Optional for conditional turn restriction parsing, provide a UTC time stamp from "
+        "which "
+        "to evaluate the validity of conditional turn restrictions")(
+        "time-zone-file",
+        boost::program_options::value<std::string>(&contractor_config.updater_config.tz_file_path),
+        "Required for conditional turn restriction parsing, provide a geojson file containing "
+        "time zone boundaries");
 
     // hidden options, will be allowed on command line, but will not be shown to the user
     boost::program_options::options_description hidden_options("Hidden options");
     hidden_options.add_options()(
         "input,i",
-        boost::program_options::value<boost::filesystem::path>(&contractor_config.osrm_input_path),
+        boost::program_options::value<boost::filesystem::path>(&contractor_config.base_path),
         "Input file in .osm, .osm.bz2 or .osm.pbf format");
 
     // positional option
@@ -126,11 +145,11 @@ return_code parseArguments(int argc, char *argv[], contractor::ContractorConfig 
 
 int main(int argc, char *argv[]) try
 {
-
     util::LogPolicy::GetInstance().Unmute();
+    std::string verbosity;
     contractor::ContractorConfig contractor_config;
 
-    const return_code result = parseArguments(argc, argv, contractor_config);
+    const return_code result = parseArguments(argc, argv, verbosity, contractor_config);
 
     if (return_code::fail == result)
     {
@@ -142,7 +161,9 @@ int main(int argc, char *argv[]) try
         return EXIT_SUCCESS;
     }
 
-    contractor_config.UseDefaultOutputNames();
+    util::LogPolicy::GetInstance().SetLevel(verbosity);
+
+    contractor_config.UseDefaultOutputNames(contractor_config.base_path);
 
     if (1 > contractor_config.requested_num_threads)
     {
@@ -158,28 +179,35 @@ int main(int argc, char *argv[]) try
                               << "! This setting may have performance side-effects.";
     }
 
-    if (!boost::filesystem::is_regular_file(contractor_config.osrm_input_path))
+    if (!contractor_config.IsValid())
     {
-        util::Log(logERROR) << "Input file " << contractor_config.osrm_input_path.string()
-                            << " not found!";
         return EXIT_FAILURE;
     }
 
-    util::Log() << "Input file: " << contractor_config.osrm_input_path.filename().string();
+    util::Log() << "Input file: " << contractor_config.base_path.string() << ".osrm";
     util::Log() << "Threads: " << contractor_config.requested_num_threads;
 
     tbb::task_scheduler_init init(contractor_config.requested_num_threads);
 
-    auto exitcode = contractor::Contractor(contractor_config).Run();
+    osrm::contract(contractor_config);
 
     util::DumpSTXXLStats();
     util::DumpMemoryStats();
 
-    return exitcode;
+    return EXIT_SUCCESS;
+}
+catch (const osrm::RuntimeError &e)
+{
+    util::DumpSTXXLStats();
+    util::DumpMemoryStats();
+    util::Log(logERROR) << e.what();
+    return e.GetCode();
 }
 catch (const std::bad_alloc &e)
 {
-    util::Log(logERROR) << "[exception] " << e.what();
+    util::DumpSTXXLStats();
+    util::DumpMemoryStats();
+    util::Log(logERROR) << e.what();
     util::Log(logERROR) << "Please provide more memory or consider using a larger swapfile";
     return EXIT_FAILURE;
 }

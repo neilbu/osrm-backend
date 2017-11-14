@@ -3,6 +3,7 @@
 
 #include "nodejs/json_v8_renderer.hpp"
 
+#include "osrm/approach.hpp"
 #include "osrm/bearing.hpp"
 #include "osrm/coordinate.hpp"
 #include "osrm/engine_config.hpp"
@@ -79,7 +80,7 @@ inline void ParseResult(const osrm::Status &result_status, osrm::json::Object &r
     }
 }
 
-inline void ParseResult(const osrm::Status &result_status, const std::string & /*unused*/) {}
+inline void ParseResult(const osrm::Status & /*result_status*/, const std::string & /*unused*/) {}
 
 inline engine_config_ptr argumentsToEngineConfig(const Nan::FunctionCallbackInfo<v8::Value> &args)
 {
@@ -161,7 +162,7 @@ inline engine_config_ptr argumentsToEngineConfig(const Nan::FunctionCallbackInfo
         }
         else if (*v8::String::Utf8Value(algorithm_str) == std::string("CoreCH"))
         {
-            engine_config->algorithm = osrm::EngineConfig::Algorithm::CoreCH;
+            engine_config->algorithm = osrm::EngineConfig::Algorithm::CH;
         }
         else if (*v8::String::Utf8Value(algorithm_str) == std::string("MLD"))
         {
@@ -178,6 +179,64 @@ inline engine_config_ptr argumentsToEngineConfig(const Nan::FunctionCallbackInfo
         Nan::ThrowError("algorithm option must be a string and one of 'CH', 'CoreCH', or 'MLD'.");
         return engine_config_ptr();
     }
+
+    // Set EngineConfig system-wide limits on construction, if requested
+
+    auto max_locations_trip = params->Get(Nan::New("max_locations_trip").ToLocalChecked());
+    auto max_locations_viaroute = params->Get(Nan::New("max_locations_viaroute").ToLocalChecked());
+    auto max_locations_distance_table =
+        params->Get(Nan::New("max_locations_distance_table").ToLocalChecked());
+    auto max_locations_map_matching =
+        params->Get(Nan::New("max_locations_map_matching").ToLocalChecked());
+    auto max_results_nearest = params->Get(Nan::New("max_results_nearest").ToLocalChecked());
+    auto max_alternatives = params->Get(Nan::New("max_alternatives").ToLocalChecked());
+
+    if (!max_locations_trip->IsUndefined() && !max_locations_trip->IsNumber())
+    {
+        Nan::ThrowError("max_locations_trip must be an integral number");
+        return engine_config_ptr();
+    }
+    if (!max_locations_viaroute->IsUndefined() && !max_locations_viaroute->IsNumber())
+    {
+        Nan::ThrowError("max_locations_viaroute must be an integral number");
+        return engine_config_ptr();
+    }
+    if (!max_locations_distance_table->IsUndefined() && !max_locations_distance_table->IsNumber())
+    {
+        Nan::ThrowError("max_locations_distance_table must be an integral number");
+        return engine_config_ptr();
+    }
+    if (!max_locations_map_matching->IsUndefined() && !max_locations_map_matching->IsNumber())
+    {
+        Nan::ThrowError("max_locations_map_matching must be an integral number");
+        return engine_config_ptr();
+    }
+    if (!max_results_nearest->IsUndefined() && !max_results_nearest->IsNumber())
+    {
+        Nan::ThrowError("max_results_nearest must be an integral number");
+        return engine_config_ptr();
+    }
+    if (!max_alternatives->IsUndefined() && !max_alternatives->IsNumber())
+    {
+        Nan::ThrowError("max_alternatives must be an integral number");
+        return engine_config_ptr();
+    }
+
+    if (max_locations_trip->IsNumber())
+        engine_config->max_locations_trip = static_cast<int>(max_locations_trip->NumberValue());
+    if (max_locations_viaroute->IsNumber())
+        engine_config->max_locations_viaroute =
+            static_cast<int>(max_locations_viaroute->NumberValue());
+    if (max_locations_distance_table->IsNumber())
+        engine_config->max_locations_distance_table =
+            static_cast<int>(max_locations_distance_table->NumberValue());
+    if (max_locations_map_matching->IsNumber())
+        engine_config->max_locations_map_matching =
+            static_cast<int>(max_locations_map_matching->NumberValue());
+    if (max_results_nearest->IsNumber())
+        engine_config->max_results_nearest = static_cast<int>(max_results_nearest->NumberValue());
+    if (max_alternatives->IsNumber())
+        engine_config->max_alternatives = static_cast<int>(max_alternatives->NumberValue());
 
     return engine_config;
 }
@@ -299,6 +358,63 @@ inline bool argumentsToParameter(const Nan::FunctionCallbackInfo<v8::Value> &arg
         BOOST_ASSERT(!coordinates->IsArray());
         Nan::ThrowError("Coordinates must be an array of (lon/lat) pairs");
         return false;
+    }
+
+    if (obj->Has(Nan::New("approaches").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> approaches = obj->Get(Nan::New("approaches").ToLocalChecked());
+        if (approaches.IsEmpty())
+            return false;
+
+        if (!approaches->IsArray())
+        {
+            Nan::ThrowError("Approaches must be an arrays of strings");
+            return false;
+        }
+
+        auto approaches_array = v8::Local<v8::Array>::Cast(approaches);
+
+        if (approaches_array->Length() != params->coordinates.size())
+        {
+            Nan::ThrowError("Approaches array must have the same length as coordinates array");
+            return false;
+        }
+
+        for (uint32_t i = 0; i < approaches_array->Length(); ++i)
+        {
+            v8::Local<v8::Value> approach_raw = approaches_array->Get(i);
+            if (approach_raw.IsEmpty())
+                return false;
+
+            if (approach_raw->IsNull())
+            {
+                params->approaches.emplace_back();
+            }
+            else if (approach_raw->IsString())
+            {
+                const Nan::Utf8String approach_utf8str(approach_raw);
+                std::string approach_str{*approach_utf8str,
+                                         *approach_utf8str + approach_utf8str.length()};
+                if (approach_str == "curb")
+                {
+                    params->approaches.push_back(osrm::Approach::CURB);
+                }
+                else if (approach_str == "unrestricted")
+                {
+                    params->approaches.push_back(osrm::Approach::UNRESTRICTED);
+                }
+                else
+                {
+                    Nan::ThrowError("'approaches' param must be one of [curb, unrestricted]");
+                    return false;
+                }
+            }
+            else
+            {
+                Nan::ThrowError("Approach must be a string: [curb, unrestricted] or null");
+                return false;
+            }
+        }
     }
 
     if (obj->Has(Nan::New("bearings").ToLocalChecked()))
@@ -471,6 +587,39 @@ inline bool argumentsToParameter(const Nan::FunctionCallbackInfo<v8::Value> &arg
         }
 
         params->generate_hints = generate_hints->BooleanValue();
+    }
+
+    if (obj->Has(Nan::New("exclude").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> exclude = obj->Get(Nan::New("exclude").ToLocalChecked());
+        if (exclude.IsEmpty())
+            return false;
+
+        if (!exclude->IsArray())
+        {
+            Nan::ThrowError("Exclude must be an array of strings or empty");
+            return false;
+        }
+
+        v8::Local<v8::Array> exclude_array = v8::Local<v8::Array>::Cast(exclude);
+
+        for (uint32_t i = 0; i < exclude_array->Length(); ++i)
+        {
+            v8::Local<v8::Value> class_name = exclude_array->Get(i);
+            if (class_name.IsEmpty())
+                return false;
+
+            if (class_name->IsString())
+            {
+                std::string class_name_str = *v8::String::Utf8Value(class_name);
+                params->exclude.emplace_back(class_name_str);
+            }
+            else
+            {
+                Nan::ThrowError("Exclude must be an array of strings or empty");
+                return false;
+            }
+        }
     }
 
     return true;
@@ -649,7 +798,7 @@ argumentsToRouteParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
 
         if (!value->IsBoolean() && !value->IsNull())
         {
-            Nan::ThrowError("'continue_straight' parama must be boolean or null");
+            Nan::ThrowError("'continue_straight' param must be boolean or null");
             return route_parameters_ptr();
         }
         if (value->IsBoolean())
@@ -664,12 +813,21 @@ argumentsToRouteParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
         if (value.IsEmpty())
             return route_parameters_ptr();
 
-        if (!value->IsBoolean())
+        if (value->IsBoolean())
         {
-            Nan::ThrowError("'alternatives' parama must be boolean");
+            params->alternatives = value->BooleanValue();
+            params->number_of_alternatives = value->BooleanValue() ? 1u : 0u;
+        }
+        else if (value->IsNumber())
+        {
+            params->alternatives = value->BooleanValue();
+            params->number_of_alternatives = static_cast<unsigned>(value->NumberValue());
+        }
+        else
+        {
+            Nan::ThrowError("'alternatives' param must be boolean or number");
             return route_parameters_ptr();
         }
-        params->alternatives = value->BooleanValue();
     }
 
     bool parsedSuccessfully = parseCommonParameters(obj, params);
@@ -1046,6 +1204,51 @@ argumentsToMatchParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
             }
             params->timestamps.emplace_back(static_cast<unsigned>(timestamp->NumberValue()));
         }
+    }
+
+    if (obj->Has(Nan::New("gaps").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> gaps = obj->Get(Nan::New("gaps").ToLocalChecked());
+        if (gaps.IsEmpty())
+            return match_parameters_ptr();
+
+        if (!gaps->IsString())
+        {
+            Nan::ThrowError("Gaps must be a string: [split, ignore]");
+            return match_parameters_ptr();
+        }
+
+        const Nan::Utf8String gaps_utf8str(gaps);
+        std::string gaps_str{*gaps_utf8str, *gaps_utf8str + gaps_utf8str.length()};
+
+        if (gaps_str == "split")
+        {
+            params->gaps = osrm::MatchParameters::GapsType::Split;
+        }
+        else if (gaps_str == "ignore")
+        {
+            params->gaps = osrm::MatchParameters::GapsType::Ignore;
+        }
+        else
+        {
+            Nan::ThrowError("'gaps' param must be one of [split, ignore]");
+            return match_parameters_ptr();
+        }
+    }
+
+    if (obj->Has(Nan::New("tidy").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> tidy = obj->Get(Nan::New("tidy").ToLocalChecked());
+        if (tidy.IsEmpty())
+            return match_parameters_ptr();
+
+        if (!tidy->IsBoolean())
+        {
+            Nan::ThrowError("tidy must be of type Boolean");
+            return match_parameters_ptr();
+        }
+
+        params->tidy = tidy->BooleanValue();
     }
 
     bool parsedSuccessfully = parseCommonParameters(obj, params);

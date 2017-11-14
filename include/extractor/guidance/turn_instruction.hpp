@@ -49,7 +49,7 @@ const constexpr Enum EnterRotary = 12;                 // Enter a rotary
 const constexpr Enum EnterAndExitRotary = 13;          // Touching a rotary
 const constexpr Enum EnterRoundaboutIntersection = 14; // Entering a small Roundabout
 const constexpr Enum EnterAndExitRoundaboutIntersection = 15; // Touching a roundabout
-const constexpr Enum UseLane = 16; // No Turn, but you need to stay on a given lane!
+// depreacted: const constexpr Enum UseLane = 16; // No Turn, but you need to stay on a given lane!
 
 // Values below here are silent instructions
 const constexpr Enum NoTurn = 17;                // end of segment without turn/middle of a segment
@@ -199,7 +199,10 @@ inline bool leavesRoundabout(const extractor::guidance::TurnInstruction instruct
 
 inline bool staysOnRoundabout(const extractor::guidance::TurnInstruction instruction)
 {
-    return instruction.type == extractor::guidance::TurnType::StayOnRoundabout;
+    return instruction.type == extractor::guidance::TurnType::StayOnRoundabout ||
+           instruction.type == extractor::guidance::TurnType::EnterRoundaboutAtExit ||
+           instruction.type == extractor::guidance::TurnType::EnterRotaryAtExit ||
+           instruction.type == extractor::guidance::TurnType::EnterRoundaboutIntersectionAtExit;
 }
 
 // Silent Turn Instructions are not to be mentioned to the outside world but
@@ -304,6 +307,86 @@ inline DirectionModifier::Enum bearingToDirectionModifier(const double bearing)
         return extractor::guidance::DirectionModifier::Straight;
     }
     return extractor::guidance::DirectionModifier::Left;
+}
+
+namespace detail
+{
+
+const constexpr char *modifier_names[] = {"uturn",
+                                          "sharp right",
+                                          "right",
+                                          "slight right",
+                                          "straight",
+                                          "slight left",
+                                          "left",
+                                          "sharp left"};
+
+/**
+ * Human readable values for TurnType enum values
+ */
+struct TurnTypeName
+{
+    // String value we return with our API
+    const char *external_name;
+    // Internal only string name for the turn type - useful for debugging
+    // and used by debug tiles for visualizing hidden turn types
+    const char *internal_name;
+};
+
+// Indexes in this list correspond to the Enum values of osrm::extractor::guidance::TurnType
+const constexpr TurnTypeName turn_type_names[] = {
+    {"invalid", "(not set)"},
+    {"new name", "new name"},
+    {"continue", "continue"},
+    {"turn", "turn"},
+    {"merge", "merge"},
+    {"on ramp", "on ramp"},
+    {"off ramp", "off ramp"},
+    {"fork", "fork"},
+    {"end of road", "end of road"},
+    {"notification", "notification"},
+    {"roundabout", "enter roundabout"},
+    {"exit roundabout", "enter and exit roundabout"},
+    {"rotary", "enter rotary"},
+    {"exit rotary", "enter and exit rotary"},
+    {"roundabout turn", "enter roundabout turn"},
+    {"roundabout turn", "enter and exit roundabout turn"},
+    {"use lane", "use lane"},
+    {"invalid", "(noturn)"},
+    {"invalid", "(suppressed)"},
+    {"roundabout", "roundabout"},
+    {"exit roundabout", "exit roundabout"},
+    {"rotary", "rotary"},
+    {"exit rotary", "exit rotary"},
+    {"roundabout turn", "roundabout turn"},
+    {"exit roundabout", "exit roundabout turn"},
+    {"invalid", "(stay on roundabout)"},
+    {"invalid", "(sliproad)"}};
+
+} // ns detail
+
+inline std::string instructionTypeToString(const TurnType::Enum type)
+{
+    static_assert(sizeof(detail::turn_type_names) / sizeof(detail::turn_type_names[0]) >=
+                      TurnType::MaxTurnType,
+                  "Some turn types have no string representation.");
+    return detail::turn_type_names[static_cast<std::size_t>(type)].external_name;
+}
+
+inline std::string internalInstructionTypeToString(const TurnType::Enum type)
+{
+    static_assert(sizeof(detail::turn_type_names) / sizeof(detail::turn_type_names[0]) >=
+                      TurnType::MaxTurnType,
+                  "Some turn types have no string representation.");
+    return detail::turn_type_names[static_cast<std::size_t>(type)].internal_name;
+}
+
+inline std::string instructionModifierToString(const DirectionModifier::Enum modifier)
+{
+    static_assert(sizeof(detail::modifier_names) / sizeof(detail::modifier_names[0]) >=
+                      DirectionModifier::MaxDirectionModifier,
+                  "Some direction modifiers have no string representation.");
+    return detail::modifier_names[static_cast<std::size_t>(modifier)];
 }
 
 } // namespace guidance

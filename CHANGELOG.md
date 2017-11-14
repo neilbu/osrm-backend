@@ -1,3 +1,181 @@
+# UNRELEASED
+  - Changes from 5.13
+    - API:
+      - new RouteStep property `driving_side` that has either "left" or "right" for that step
+    - Misc:
+      - Bundles a rough (please improve!) driving-side GeoJSON file for use with `osrm-extract --location-dependent-data data/driving_side.geojson`
+    - Profile:
+      - Remove dependency on turn types and turn modifier in the process_turn function in the `car.lua` profile. Guidance instruction types are not used to influence turn penalty anymore so this will break backward compatibility between profile version 3 and 4.
+    - Bugfixes:
+      - Fixed #4670: Fix bug where merge instructions got the wrong direction modifier
+      - Properly use the `profile.properties.left_hand_driving` property, there was a typo that meant it had no effect
+
+# 5.13.0
+  - Changes from 5.12:
+    - Profile:
+      - Append cardinal directions from route relations to ref fields to improve instructions; off by default see `profile.cardinal_directions`
+      - Support of `distance` weight in foot and bicycle profiles
+      - Support of relations processing
+      - Added `way:get_location_tag(key)` method to get location-dependent tags https://github.com/Project-OSRM/osrm-backend/wiki/Using-location-dependent-data-in-profiles
+      - Added `forward_ref` and `backward_ref` support
+      - Left-side driving mode is specified by a local Boolean flag `is_left_hand_driving` in `ExtractionWay` and `ExtractionTurn`
+      - Support literal values for maxspeeds in NO, PL and ZA
+    - Infrastructure:
+      - Lua 5.1 support is removed due to lack of support in sol2 https://github.com/ThePhD/sol2/issues/302
+      - Fixed pkg-config version of OSRM
+      - Removed `.osrm.core` file since CoreCH is deprecated now.
+    - Tools:
+      - Because of boost/program_options#32 with boost 1.65+ we needed to change the behavior of the following flags to not accept `={true|false}` anymore:
+        - `--use-locations-cache=false` becomes `--disable-location-cache`
+        - `--parse-conditional-restrictions=true` becomes `--parse-conditional-restrictions`
+        - The deprecated options `--use-level-cache` and `--generate-edge-lookup`
+    - Bugfixes:
+      - Fixed #4348: Some cases of sliproads pre-processing were broken
+      - Fixed #4331: Correctly compute left/right modifiers of forks in case the fork is curved.
+      - Fixed #4472: Correctly count the number of lanes using the delimter in `turn:lanes` tag.
+      - Fixed #4214: Multiple runs of `osrm-partition` lead to crash.
+      - Fixed #4348: Fix assorted problems around slip roads.
+      - Fixed #4420: A bug that would result in unnecessary instructions, due to problems in suffix/prefix detection
+    - Algorithm
+      - Deprecate CoreCH functionality. Usage of CoreCH specific options will fall back to using CH with core_factor of 1.0
+      - MLD uses a unidirectional Dijkstra for 1-to-N and N-to-1 matrices which yields speedup.
+
+# 5.12.0
+  - Changes from 5.11:
+    - Guidance
+      - now announcing turning onto oneways at the end of a road (e.g. onto dual carriageways)
+      - Adds new instruction types at the exit of roundabouts and rotaries `exit roundabout` and `exit rotary`.
+    - HTTP:
+      - New query parameter for route/table/match/trip plugings:
+        `exclude=` that can be used to exclude certain classes (e.g. exclude=motorway, exclude=toll).
+        This is configurable in the profile.
+    - NodeJS:
+      - New query option `exclude` for the route/table/match/trip plugins. (e.g. `exclude: ["motorway", "toll"]`)
+    - Profile:
+      - New property for profile table: `excludable` that can be used to configure which classes are excludable at query time.
+      - New optional property for profile table: `classes` that allows you to specify which classes you expect to be used.
+        We recommend this for better error messages around classes, otherwise the possible class names are infered automatically.
+    - Traffic:
+      - If traffic data files contain an empty 4th column, they will update edge durations but not modify the edge weight.  This is useful for
+        updating ETAs returned, without changing route selection (for example, in a distance-based profile with traffic data loaded).
+    - Infrastructure:
+      - New file `.osrm.cell_metrics` created by `osrm-customize`.
+    - Debug tiles:
+      - Added new properties `type` and `modifier` to `turns` layer, useful for viewing guidance calculated turn types on the map
+
+# 5.11.0
+  - Changes from 5.10:
+    - Features
+      - BREAKING: Added support for conditional via-way restrictions. This features changes the file format of osrm.restrictions and requires re-extraction
+    - Internals
+      - BREAKING: Traffic signals will no longer be represented as turns internally. This requires re-processing of data but enables via-way turn restrictions across highway=traffic_signals
+      - Additional checks for empty segments when loading traffic data files
+      - Tunes the constants for turns in sharp curves just a tiny bit to circumvent a mix-up in fork directions at a specific intersection (https://github.com/Project-OSRM/osrm-backend/issues/4331)
+    - Infrastructure
+      - Refactor datafacade to make implementing additional DataFacades simpler
+    - Bugfixes
+      - API docs are now buildable again
+      - Suppress unnecessary extra turn instruction when exiting a motorway via a motorway_link onto a primary road (https://github.com/Project-OSRM/osrm-backend/issues/4348 scenario 4)
+      - Suppress unnecessary extra turn instruction when taking a tertiary_link road from a teritary onto a residential road (https://github.com/Project-OSRM/osrm-backend/issues/4348 scenario 2)
+      - Various MSVC++ build environment fixes
+      - Avoid a bug that crashes GCC6
+      - Re-include .npmignore to slim down published modules
+      - Fix a pre-processing bug where incorrect directions could be issued when two turns would have similar instructions and we tried to give them distinct values (https://github.com/Project-OSRM/osrm-backend/pull/4375)
+      - The entry bearing for correct the cardinality of a direction value (https://github.com/Project-OSRM/osrm-backend/pull/4353
+      - Change timezones in West Africa to the WAT zone so they're recognized on the Windows platform
+
+# 5.10.0
+  - Changes from 5.9:
+    - Profiles:
+      - New version 2 profile API which cleans up a number of things and makes it easier to for profiles to include each other. Profiles using the old version 0 and 1 APIs are still supported.
+      - New required `setup()` function that must return a configuration hash. Storing configuration in globals is deprecated.
+      - Passes the config hash returned in `setup()` as an argument to `process_node/way/segment/turn`.
+      - Properties are now set in `.properties` in the config hash returend by setup().
+      - initialize raster sources in `setup()` instead of in a separate callback.
+      - Renames the `sources` helper to `raster`.
+      - Renames `way_functions` to `process_way` (same for node, segment and turn).
+      - Removes `get_restrictions()`. Instead set `.restrictions` in the config hash in `setup()`.
+      - Removes `get_name_suffix_list()`. Instead set `.suffix_list` in the config hash in `setup()`.
+      - Renames `Handlers` to `WayHandlers`.
+      - Pass functions instead of strings to `WayHandlers.run()`, so it's possible to mix in your own functions.
+      - Reorders arguments to `WayHandlers` functions to match `process_way()`.
+      - Profiles must return a hash of profile functions. This makes it easier for profiles to include each other.
+      - Guidance: add support for throughabouts
+    - Bugfixes
+      - Properly save/retrieve datasource annotations for road segments ([#4346](https://github.com/Project-OSRM/osrm-backend/issues/4346)
+      - Fix conditional restriction grammer parsing so it works for single-day-of-week restrictions ([#4357](https://github.com/Project-OSRM/osrm-backend/pull/4357))
+    - Algorithm
+      - BREAKING: the file format requires re-processing due to the changes on via-ways
+      - Added support for via-way restrictions
+
+# 5.9.2
+    - API:
+      - `annotations=durations,weights,speeds` values no longer include turn penalty values ([#4330](https://github.com/Project-OSRM/osrm-backend/issues/4330))
+
+# 5.9.1
+    - Infrastructure
+      - STXXL is not required by default
+
+# 5.9.0
+  - Changes from 5.8:
+    - Algorithm:
+      - Multi-Level Dijkstra:
+        - Plugins supported: `table`
+        - Adds alternative routes support (see [#4047](https://github.com/Project-OSRM/osrm-backend/pull/4047) and [3905](https://github.com/Project-OSRM/osrm-backend/issues/3905)): provides reasonably looking alternative routes (many, if possible) with reasonable query times.
+    - API:
+      - Exposes `alternatives=Number` parameter overload in addition to the boolean flag.
+      - Support for exits numbers and names. New member `exits` in `RouteStep`, based on `junction:ref` on ways
+      - `Intersection` now has new parameter `classes` that can be set in the profile on each way.
+    - Profiles:
+      - `result.exits` allows you to set a way's exit numbers and names, see [`junction:ref`](http://wiki.openstreetmap.org/wiki/Proposed_features/junction_details)
+      - `ExtractionWay` now as new property `forward_classes` and `backward_classes` that can set in the `way_function`.
+         The maximum number of classes is 8.
+      - We now respect the `construction` tag. If the `construction` tag value is not on our whitelist (`minor`, `widening`, `no`) we will exclude the road.
+    - Node.js Bindings:
+      - Exposes `alternatives=Number` parameter overload in addition to the boolean flag
+      - Expose `EngineConfig` options in the node bindings
+    - Tools:
+      - Exposes engine limit on number of alternatives to generate `--max-alternatives` in `osrm-routed` (3 by default)
+    - Infrastructure
+      - STXXL is not required to build OSRM and is an optional dependency for back-compatibility (ENABLE_STXXL=On)
+      - OpenMP is only required when the optional STXXL dependency is used
+    - Bug fixes:
+      - #4278: Remove superflous continious instruction on a motorway.
+
+# 5.8.0
+  - Changes from 5.7
+    - API:
+      - polyline6 support in request string
+      - new parameter `approaches` for `route`, `table`, `trip` and `nearest` requests.  This parameter keep waypoints on the curb side.
+        'approaches' accepts both 'curb' and 'unrestricted' values.
+        Note : the curb side depend on the `ProfileProperties::left_hand_driving`, it's a global property set once by the profile. If you are working with a planet dataset, the api will be wrong in some countries, and right in others.
+    - NodeJs Bindings
+      - new parameter `approaches` for `route`, `table`, `trip` and `nearest` requests.
+    - Tools
+      - `osrm-partition` now ensures it is called before `osrm-contract` and removes inconsitent .hsgr files automatically.
+    - Features
+      - Added conditional restriction support with `parse-conditional-restrictions=true|false` to osrm-extract. This option saves conditional turn restrictions to the .restrictions file for parsing by contract later. Added `parse-conditionals-from-now=utc time stamp` and `--time-zone-file=/path/to/file`  to osrm-contract
+      - Command-line tools (osrm-extract, osrm-contract, osrm-routed, etc) now return error codes and legible error messages for common problem scenarios, rather than ugly C++ crashes
+      - Speed up pre-processing by only running the Lua `node_function` for nodes that have tags.  Cuts OSM file parsing time in half.
+      - osrm-extract now performs generation of edge-expanded-edges using all available CPUs, which should make osrm-extract significantly faster on multi-CPU machines
+    - Files
+      - .osrm.nodes file was renamed to .nbg_nodes and .ebg_nodes was added
+    - Guidance
+      - #4075 Changed counting of exits on service roundabouts
+    - Debug Tiles
+      - added support for visualising turn penalties to the MLD plugin
+      - added support for showing the rate (reciprocal of weight) on each edge when used
+      - added support for turn weights in addition to turn durations in debug tiles
+    - Bugfixes
+      - Fixed a copy/paste issue assigning wrong directions in similar turns (left over right)
+      - #4074: fixed a bug that would announce entering highway ramps as u-turns
+      - #4122: osrm-routed/libosrm should throw exception when a dataset incompatible with the requested algorithm is loaded
+      - Avoid collapsing u-turns into combined turn instructions
+
+# 5.7.1
+    - Bugfixes
+      - #4030 Roundabout edge-case crashes post-processing
+
 # 5.7.0
   - Changes from 5.6
     - Algorithm:

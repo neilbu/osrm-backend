@@ -16,9 +16,12 @@ module.exports = function () {
 
                     var headers = new Set(table.raw()[0]);
 
+                    got.code = 'unknown';
                     if (res.body.length) {
                         json = JSON.parse(res.body);
+                        got.code = json.code;
                     }
+
 
                     if (headers.has('status')) {
                         got.status = json.status.toString();
@@ -33,7 +36,7 @@ module.exports = function () {
                         got['#'] = row['#'];
                     }
 
-                    var subMatchings = [],
+                    var subMatchings = [''],
                         turns = '',
                         route = '',
                         duration = '',
@@ -225,7 +228,7 @@ module.exports = function () {
                         for (var i=0; i<row.trace.length; i++) {
                             var n = row.trace[i],
                                 node = this.findNodeByName(n);
-                            if (!node) throw new Error(util.format('*** unknown waypoint node "%s"'), n);
+                            if (!node) throw new Error(util.format('*** unknown waypoint node "%s"', n));
                             trace.push(node);
                         }
                         if (row.timestamps) {

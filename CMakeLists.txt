@@ -14,6 +14,11 @@ if(BUILD_AS_SUBPROJECT)
   message(STATUS "Building libosrm as subproject.")
 endif()
 
+# set OSRM_BUILD_DIR location (might be used in various scripts)
+if (NOT WIN32 AND NOT DEFINED ENV{OSRM_BUILD_DIR})
+  set(ENV{OSRM_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
 option(ENABLE_MASON "Use mason for dependencies" OFF)
 option(ENABLE_CCACHE "Speed up incremental rebuilds via ccache" ON)
 option(BUILD_TOOLS "Build OSRM tools" OFF)
@@ -21,21 +26,23 @@ option(BUILD_PACKAGE "Build OSRM package" OFF)
 option(ENABLE_ASSERTIONS "Use assertions in release mode" OFF)
 option(ENABLE_COVERAGE "Build with coverage instrumentalisation" OFF)
 option(ENABLE_SANITIZER "Use memory sanitizer for Debug build" OFF)
+option(ENABLE_STXXL "Use STXXL library" OFF)
 option(ENABLE_LTO "Use LTO if available" OFF)
 option(ENABLE_FUZZING "Fuzz testing using LLVM's libFuzzer" OFF)
 option(ENABLE_GOLD_LINKER "Use GNU gold linker if available" ON)
 option(ENABLE_NODE_BINDINGS "Build NodeJs bindings" OFF)
+option(ENABLE_GLIBC_WORKAROUND "Workaround GLIBC symbol exports" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 if(ENABLE_MASON)
   # versions in use
-  set(MASON_BOOST_VERSION "1.63.0")
+  set(MASON_BOOST_VERSION "1.65.1")
   set(MASON_STXXL_VERSION "1.4.1-1")
   set(MASON_EXPAT_VERSION "2.2.0")
   set(MASON_LUA_VERSION "5.2.4")
   set(MASON_BZIP2_VERSION "1.0.6")
-  set(MASON_TBB_VERSION "2017_20161128")
+  set(MASON_TBB_VERSION "2017_U7")
   set(MASON_LIBSHP_VERSION "1.3.0")
 
   message(STATUS "Enabling mason")
@@ -54,7 +61,7 @@ if (POLICY CMP0048)
 endif()
 project(OSRM C CXX)
 set(OSRM_VERSION_MAJOR 5)
-set(OSRM_VERSION_MINOR 8)
+set(OSRM_VERSION_MINOR 14)
 set(OSRM_VERSION_PATCH 0)
 set(OSRM_VERSION "${OSRM_VERSION_MAJOR}.${OSRM_VERSION_MINOR}.${OSRM_VERSION_PATCH}")
 
@@ -96,11 +103,11 @@ if(WIN32 AND MSVC_VERSION LESS 1900)
 endif()
 
 # Strictly require GCC>=4.9 and Clang>=3.4 - GCC 4.8 is already too old for C++14.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9)
     message(FATAL_ERROR "GCC>=4.9 required. In case you are on Ubuntu upgrade via ppa:ubuntu-toolchain-r/test")
   endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.4)
     message(FATAL_ERROR "Clang>=3.4 required. In case you are on Ubuntu upgrade via http://apt.llvm.org")
   endif()
@@ -126,6 +133,7 @@ file(GLOB UpdaterGlob src/updater/*.cpp)
 file(GLOB StorageGlob src/storage/*.cpp)
 file(GLOB ServerGlob src/server/*.cpp src/server/**/*.cpp)
 file(GLOB EngineGlob src/engine/*.cpp src/engine/**/*.cpp)
+file(GLOB ErrorcodesGlob src/osrm/errorcodes.cpp)
 
 add_library(UTIL OBJECT ${UtilGlob})
 add_library(EXTRACTOR OBJECT ${ExtractorGlob})
@@ -175,7 +183,7 @@ endif()
 
 # Disable LTO when mason+gcc is detected before testing for / setting any flags.
 # Mason builds libraries with Clang, mixing does not work in the context of lto.
-if(ENABLE_MASON AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ENABLE_LTO)
+if(ENABLE_MASON AND CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND ENABLE_LTO)
   set(ENABLE_LTO OFF)
   message(WARNING "Mason and GCC's LTO not work together. Disabling LTO.")
 endif()
@@ -204,18 +212,18 @@ endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug OR CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
   message(STATUS "Configuring debug mode flags")
   set(ENABLE_ASSERTIONS ON)
-  if(NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-inline -fno-omit-frame-pointer")
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-      if (CMAKE_BUILD_TYPE MATCHES Debug)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Og -ggdb")
-      else()
-        # Don't override the -O parameter for RelWithDebInfo, we want an optimized build
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb")
-      endif()
-    endif()
-  endif()
 endif()
+
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -fno-inline -fno-omit-frame-pointer")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-inline -fno-omit-frame-pointer")
+endif()
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -ggdb")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og -ggdb")
+endif()
+
 
 if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinRelSize OR CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
   message(STATUS "Configuring release mode optimizations")
@@ -225,7 +233,7 @@ if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinRelSize OR CM
   if(ENABLE_LTO AND LTO_AVAILABLE)
     set(OLD_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     # GCC in addition allows parallelizing LTO
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
       include(ProcessorCount)
       ProcessorCount(NPROC)
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto=${NPROC}")
@@ -248,7 +256,7 @@ if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinRelSize OR CM
     endif()
 
     # Since gcc 4.9 the LTO format is non-standart ('slim'), so we need to use the build-in tools
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND
         NOT "${CMAKE_CXX_COMPILER_VERSION}" VERSION_LESS "4.9.0" AND NOT MINGW)
       find_program(GCC_AR gcc-ar)
       find_program(GCC_RANLIB gcc-ranlib)
@@ -264,7 +272,7 @@ if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinRelSize OR CM
     endif()
 
     # Same for clang LTO requires their own toolchain
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       find_program(LLVM_AR llvm-ar)
       find_program(LLVM_RANLIB llvm-ranlib)
       if ("${LLVM_AR}" STREQUAL "LLVM_AR-NOTFOUND" OR "${LLVM_RANLIB}" STREQUAL "LLVM_RANLIB-NOTFOUND")
@@ -278,7 +286,7 @@ if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinRelSize OR CM
       endif()
     endif()
 
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND "${CMAKE_CXX_COMPILER_VERSION}" VERSION_LESS "4.9.0")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND "${CMAKE_CXX_COMPILER_VERSION}" VERSION_LESS "4.9.0")
       message(STATUS "Disabling LTO on GCC < 4.9.0 since it is broken, see: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=57038")
       set(CMAKE_CXX_FLAGS "${OLD_CXX_FLAGS}")
       set(ENABLE_LTO Off)
@@ -296,10 +304,11 @@ if (ENABLE_COVERAGE)
   if (NOT CMAKE_BUILD_TYPE MATCHES "Debug")
     message(ERROR "ENABLE_COVERAGE=ON only make sense with a Debug build")
   endif()
-  message(INFO "Enabling coverage")
+  message(STATUS "Enabling coverage")
   set(MAYBE_COVERAGE_LIBRARIES "-lgcov")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftest-coverage -fprofile-arcs")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ftest-coverage -fprofile-arcs")
 endif()
+
 if (ENABLE_SANITIZER)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
   set(OSRM_CXXFLAGS "${OSRM_CXXFLAGS} -fsanitize=address")
@@ -308,9 +317,9 @@ if (ENABLE_SANITIZER)
 endif()
 
 # Configuring compilers
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic -Wuninitialized -Wunreachable-code -Wstrict-overflow=2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIC -fcolor-diagnostics -ftemplate-depth=1024 -Wno-unused-command-line-argument")
-elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   set(COLOR_FLAG "-fdiagnostics-color=auto")
   check_cxx_compiler_flag("-fdiagnostics-color=auto" HAS_COLOR_FLAG)
   if(NOT HAS_COLOR_FLAG)
@@ -330,13 +339,14 @@ elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fpermissive")
   endif()
 
-elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
   # using Intel C++
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-intel -wd10237 -Wall -ipo -fPIC")
-elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   # using Visual Studio C++
   set(BOOST_COMPONENTS ${BOOST_COMPONENTS} zlib)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj") # avoid compiler error C1128 from scripting_environment_lua.cpp
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /DWIN32_LEAN_AND_MEAN") # avoid compiler error C2011 from dual #include of winsock.h and winsock2.h
   add_dependency_defines(-DBOOST_LIB_DIAGNOSTIC)
   add_dependency_defines(-D_CRT_SECURE_NO_WARNINGS)
   add_dependency_defines(-DNOMINMAX) # avoid min and max macros that can break compilation
@@ -352,7 +362,7 @@ execute_process(COMMAND ${CMAKE_CXX_COMPILER} "-Wl,--version" ERROR_QUIET OUTPUT
 # For ld.gold and ld.bfs (the GNU linkers) we optimize hard
 if("${LINKER_VERSION}" MATCHES "GNU gold" OR "${LINKER_VERSION}" MATCHES "GNU ld")
   message(STATUS "Setting linker optimizations")
-  if(NOT (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC" OR "${LD_AVOID_GC_SECTIONS}"))
+  if(NOT (CMAKE_CXX_COMPILER_ID MATCHES "MSVC" OR "${LD_AVOID_GC_SECTIONS}"))
     # Tell compiler to put every function in separate section, linker can then match sections and functions
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
     # Tell linker to do dead code and data eminination during link time discarding sections
@@ -370,9 +380,9 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${LINKER_FLAGS}")
 set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${LINKER_FLAGS}")
 
 # Activate C++1y
-if(NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1y")
-  set(OSRM_CXXFLAGS "${OSRM_CXXFLAGS} -std=c++1y")
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+  set(OSRM_CXXFLAGS "${OSRM_CXXFLAGS} -std=c++14")
 endif()
 
 # Configuring other platform dependencies
@@ -427,9 +437,12 @@ if(ENABLE_MASON)
   mason_use(boost_libsystem VERSION ${MASON_BOOST_VERSION})
   set(Boost_SYSTEM_LIBRARY ${MASON_PACKAGE_boost_libsystem_STATIC_LIBS})
 
-  mason_use(stxxl VERSION ${MASON_STXXL_VERSION})
-  add_dependency_includes(${MASON_PACKAGE_stxxl_INCLUDE_DIRS})
-  set(STXXL_LIBRARY ${MASON_PACKAGE_stxxl_STATIC_LIBS})
+  if (ENABLE_STXXL)
+    mason_use(stxxl VERSION ${MASON_STXXL_VERSION})
+    add_dependency_includes(${MASON_PACKAGE_stxxl_INCLUDE_DIRS})
+    set(MAYBE_STXXL_LIBRARY ${MASON_PACKAGE_stxxl_STATIC_LIBS})
+    add_definitions(-DUSE_STXXL_LIBRARY)
+  endif()
 
   mason_use(expat VERSION ${MASON_EXPAT_VERSION})
   add_dependency_includes(${MASON_PACKAGE_expat_INCLUDE_DIRS})
@@ -447,10 +460,6 @@ if(ENABLE_MASON)
   add_dependency_includes(${MASON_PACKAGE_tbb_INCLUDE_DIRS})
   set(TBB_LIBRARIES ${MASON_PACKAGE_tbb_LDFLAGS})
 
-  mason_use(libshp2 VERSION ${MASON_LIBSHP_VERSION})
-  set(LIBSHAPEFILE_INCLUDE_DIR ${MASON_PACKAGE_libshp2_INCLUDE_DIRS})
-  set(LIBSHAPEFILE_LIBRARY ${MASON_PACKAGE_libshp2_LDFLAGS})
-
   if(NOT MASON_PACKAGE_tbb_LIBRARY_DIRS)
     message(FATAL_ERROR "MASON_PACKAGE_tbb_LIBRARY_DIRS is empty, rpath will not work")
   endif()
@@ -461,7 +470,7 @@ if(ENABLE_MASON)
     install(FILES ${TBBGlob} DESTINATION lib)
   endforeach()
   if(APPLE)
-    set(LINKER_FLAGS "${TBB_LINKER_RPATHS} -Wl,-rpath -Wl,@executable_path")
+    set(LINKER_FLAGS "${TBB_LINKER_RPATHS} -Wl,-rpath -Wl,@loader_path")
   elseif(UNIX)
     set(LINKER_FLAGS "${TBB_LINKER_RPATHS} '-Wl,-rpath,$ORIGIN' -Wl,-z,origin")
   endif()
@@ -476,6 +485,8 @@ if(ENABLE_MASON)
   # note: we avoid calling find_package(Osmium ...) here to ensure that the
   # expat and bzip2 are used from mason rather than the system
   include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libosmium/include)
+
+  include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson/include)
 
 else()
 
@@ -494,35 +505,24 @@ else()
   find_package(EXPAT REQUIRED)
   add_dependency_includes(${EXPAT_INCLUDE_DIRS})
 
-  find_package(STXXL REQUIRED)
-  add_dependency_includes(${STXXL_INCLUDE_DIR})
+  if (ENABLE_STXXL)
+    find_package(STXXL)
+    if (STXXL_FOUND)
+      add_dependency_includes(${STXXL_INCLUDE_DIR})
+      set(MAYBE_STXXL_LIBRARY ${STXXL_LIBRARY})
+      add_definitions(-DUSE_STXXL_LIBRARY)
+    else()
+      MESSAGE(STATUS "STXXL was requested but not found, default STL will be used")
+    endif()
+  endif()
 
   find_package(BZip2 REQUIRED)
   add_dependency_includes(${BZIP2_INCLUDE_DIR})
 
-  FIND_PACKAGE(Lua 5.2 EXACT)
-  IF (LUA_FOUND)
-      MESSAGE(STATUS "Using Lua ${LUA_VERSION_STRING}")
-  ELSE()
-    FIND_PACKAGE(Lua 5.1 EXACT)
-    IF (LUA_FOUND)
-      MESSAGE(STATUS "Using Lua ${LUA_VERSION_STRING}")
-    ELSE()
-      # Now fall back to a lua verison without exact
-      # in case this cmake version also forces patch versions
-      FIND_PACKAGE(Lua 5.2)
-      IF (LUA_FOUND)
-          MESSAGE(STATUS "Using Lua ${LUA_VERSION_STRING}")
-      ELSE()
-        FIND_PACKAGE(Lua 5.1)
-        IF (LUA_FOUND)
-          MESSAGE(STATUS "Using Lua ${LUA_VERSION_STRING}")
-        ELSE()
-          MESSAGE(FATAL_ERROR "Lua 5.1 or 5.2 was not found.")
-        ENDIF()
-      ENDIF()
-    ENDIF()
-  ENDIF()
+  find_package(Lua 5.2 REQUIRED)
+  if (LUA_FOUND)
+    message(STATUS "Using Lua ${LUA_VERSION_STRING}")
+  endif()
 
   set(USED_LUA_LIBRARIES ${LUA_LIBRARIES})
   add_dependency_includes(${LUA_INCLUDE_DIR})
@@ -546,10 +546,13 @@ else()
   find_package(Osmium REQUIRED COMPONENTS io)
   include_directories(SYSTEM ${OSMIUM_INCLUDE_DIR})
 
+  set(RAPIDJSON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson/include")
+  include_directories(SYSTEM ${RAPIDJSON_INCLUDE_DIR})
+
 endif()
 
 # prefix compilation with ccache by default if available and on clang or gcc
-if(ENABLE_CCACHE AND (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU"))
+if(ENABLE_CCACHE AND (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU"))
   find_program(CCACHE_FOUND ccache)
   if(CCACHE_FOUND)
     message(STATUS "Using ccache to speed up incremental builds")
@@ -576,11 +579,13 @@ add_dependency_defines(-DBOOST_SPIRIT_USE_PHOENIX_V3)
 add_dependency_defines(-DBOOST_RESULT_OF_USE_DECLTYPE)
 add_dependency_defines(-DBOOST_FILESYSTEM_NO_DEPRECATED)
 
-set(OpenMP_FIND_QUIETLY ON)
-find_package(OpenMP)
-if(OPENMP_FOUND)
-  message(STATUS "OpenMP support found. Linking just in case for stxxl")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+if (ENABLE_STXXL)
+  set(OpenMP_FIND_QUIETLY ON)
+  find_package(OpenMP)
+  if(OPENMP_FOUND)
+    message(STATUS "OpenMP support found. Linking just in case for stxxl")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+  endif()
 endif()
 
 add_definitions(${OSRM_DEFINES})
@@ -615,7 +620,7 @@ set(EXTRACTOR_LIBRARIES
     ${EXPAT_LIBRARIES}
     ${USED_LUA_LIBRARIES}
     ${OSMIUM_LIBRARIES}
-    ${STXXL_LIBRARY}
+    ${MAYBE_STXXL_LIBRARY}
     ${TBB_LIBRARIES}
     ${ZLIB_LIBRARY}
     ${MAYBE_COVERAGE_LIBRARIES})
@@ -637,12 +642,13 @@ set(UPDATER_LIBRARIES
     ${CMAKE_THREAD_LIBS_INIT}
     ${TBB_LIBRARIES}
     ${MAYBE_RT_LIBRARY}
-    ${MAYBE_COVERAGE_LIBRARIES})
+    ${MAYBE_COVERAGE_LIBRARIES}
+    ${ZLIB_LIBRARY})
 set(CONTRACTOR_LIBRARIES
     ${BOOST_BASE_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
     ${USED_LUA_LIBRARIES}
-    ${STXXL_LIBRARY}
+    ${MAYBE_STXXL_LIBRARY}
     ${TBB_LIBRARIES}
     ${MAYBE_RT_LIBRARY}
     ${MAYBE_COVERAGE_LIBRARIES})
@@ -662,21 +668,22 @@ set(STORAGE_LIBRARIES
 set(UTIL_LIBRARIES
     ${BOOST_BASE_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${STXXL_LIBRARY}
+    ${MAYBE_STXXL_LIBRARY}
     ${TBB_LIBRARIES}
     ${MAYBE_COVERAGE_LIBRARIES})
+
 # Libraries
 target_link_libraries(osrm ${ENGINE_LIBRARIES})
 target_link_libraries(osrm_update ${UPDATER_LIBRARIES})
-target_link_libraries(osrm_contract ${CONTRACTOR_LIBRARIES} osrm_update)
+target_link_libraries(osrm_contract ${CONTRACTOR_LIBRARIES} osrm_update osrm_store)
 target_link_libraries(osrm_extract ${EXTRACTOR_LIBRARIES})
 target_link_libraries(osrm_partition ${PARTITIONER_LIBRARIES})
-target_link_libraries(osrm_customize ${CUSTOMIZER_LIBRARIES} osrm_update)
+target_link_libraries(osrm_customize ${CUSTOMIZER_LIBRARIES} osrm_update osrm_store)
 target_link_libraries(osrm_store ${STORAGE_LIBRARIES})
 
 # BUILD_COMPONENTS
 add_executable(osrm-components src/tools/components.cpp $<TARGET_OBJECTS:UTIL>)
-target_link_libraries(osrm-components ${TBB_LIBRARIES} ${BOOST_BASE_LIBRARIES})
+target_link_libraries(osrm-components ${TBB_LIBRARIES} ${BOOST_BASE_LIBRARIES} ${UTIL_LIBRARIES})
 install(TARGETS osrm-components DESTINATION bin)
 
 if(BUILD_TOOLS)
@@ -686,12 +693,12 @@ if(BUILD_TOOLS)
 
   install(TARGETS osrm-io-benchmark DESTINATION bin)
 
-  find_package(Shapefile) # package libshp-dev
+  find_package(Shapefile)
   if(SHAPEFILE_FOUND AND (Boost_VERSION VERSION_GREATER 106000 OR ENABLE_MASON))
     add_executable(osrm-extract-conditionals src/tools/extract-conditionals.cpp $<TARGET_OBJECTS:UTIL>)
     target_include_directories(osrm-extract-conditionals PRIVATE ${LIBSHAPEFILE_INCLUDE_DIR})
     target_link_libraries(osrm-extract-conditionals ${OSMIUM_LIBRARIES} ${BOOST_BASE_LIBRARIES} ${Boost_PROGRAM_OPTIONS_LIBRARY}
-      ${LIBSHAPEFILE_LIBRARY} ${BZIP2_LIBRARIES} ${ZLIB_LIBRARY} ${EXPAT_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+        ${UTIL_LIBRARIES} ${BZIP2_LIBRARIES} ${ZLIB_LIBRARY} ${EXPAT_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
     install(TARGETS osrm-extract-conditionals DESTINATION bin)
   endif()
 endif()
@@ -713,12 +720,12 @@ set_property(TARGET osrm-routed PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE)
 file(GLOB VariantGlob third_party/variant/include/mapbox/*.hpp)
 file(GLOB LibraryGlob include/osrm/*.hpp)
 file(GLOB ParametersGlob include/engine/api/*_parameters.hpp)
-set(EngineHeader include/engine/status.hpp include/engine/engine_config.hpp include/engine/hint.hpp include/engine/bearing.hpp include/engine/phantom_node.hpp)
-set(UtilHeader include/util/coordinate.hpp include/util/json_container.hpp include/util/typedefs.hpp include/util/alias.hpp include/util/exception.hpp)
-set(ExtractorHeader include/extractor/extractor.hpp include/extractor/extractor_config.hpp include/extractor/travel_mode.hpp)
+set(EngineHeader include/engine/status.hpp include/engine/engine_config.hpp include/engine/hint.hpp include/engine/bearing.hpp include/engine/approach.hpp include/engine/phantom_node.hpp)
+set(UtilHeader include/util/coordinate.hpp include/util/json_container.hpp include/util/typedefs.hpp include/util/alias.hpp include/util/exception.hpp include/util/bearing.hpp)
+set(ExtractorHeader include/extractor/extractor.hpp include/storage/io_config.hpp include/extractor/extractor_config.hpp include/extractor/travel_mode.hpp)
 set(PartitionerHeader include/partition/partitioner.hpp include/partition/partition_config.hpp)
 set(ContractorHeader include/contractor/contractor.hpp include/contractor/contractor_config.hpp)
-set(StorageHeader include/storage/storage.hpp include/storage/storage_config.hpp)
+set(StorageHeader include/storage/storage.hpp include/storage/io_config.hpp include/storage/storage_config.hpp)
 install(FILES ${EngineHeader} DESTINATION include/osrm/engine)
 install(FILES ${UtilHeader} DESTINATION include/osrm/util)
 install(FILES ${StorageHeader} DESTINATION include/osrm/storage)
@@ -730,12 +737,14 @@ install(FILES ${ParametersGlob} DESTINATION include/osrm/engine/api)
 install(FILES ${VariantGlob} DESTINATION include/mapbox)
 install(TARGETS osrm-extract DESTINATION bin)
 install(TARGETS osrm-partition DESTINATION bin)
+install(TARGETS osrm-customize DESTINATION bin)
 install(TARGETS osrm-contract DESTINATION bin)
 install(TARGETS osrm-datastore DESTINATION bin)
 install(TARGETS osrm-routed DESTINATION bin)
 install(TARGETS osrm DESTINATION lib)
 install(TARGETS osrm_extract DESTINATION lib)
 install(TARGETS osrm_partition DESTINATION lib)
+install(TARGETS osrm_customize DESTINATION lib)
 install(TARGETS osrm_update DESTINATION lib)
 install(TARGETS osrm_contract DESTINATION lib)
 install(TARGETS osrm_store DESTINATION lib)
@@ -787,7 +796,7 @@ JOIN("-I${DEPENDENCIES_INCLUDE_DIRS}" " -I" PKGCONFIG_OSRM_INCLUDE_FLAGS)
 JOIN("${ENGINE_LIBRARIES}" " " PKGCONFIG_OSRM_DEPENDENT_LIBRARIES)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pkgconfig.in libosrm.pc @ONLY)
-install(FILES ${PROJECT_BINARY_DIR}/libosrm.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+install(FILES ${PROJECT_BINARY_DIR}/libosrm.pc DESTINATION ${PKGCONFIG_LIBRARY_DIR}/pkgconfig)
 
 # uninstall target
 configure_file(
@@ -802,6 +811,10 @@ add_custom_target(uninstall
 # Modular build system: each directory registered here provides its own CMakeLists.txt
 add_subdirectory(unit_tests)
 add_subdirectory(src/benchmarks)
+
+if (ENABLE_GLIBC_WORKAROUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DGLIBC_WORKAROUND")
+endif()
 
 if (ENABLE_NODE_BINDINGS)
   add_subdirectory(src/nodejs)

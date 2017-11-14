@@ -3,6 +3,7 @@
 
 #include "util/dynamic_graph.hpp"
 #include "util/packed_vector.hpp"
+#include "util/range_table.hpp"
 #include "util/static_graph.hpp"
 
 #include "storage/io.hpp"
@@ -14,6 +15,22 @@ namespace util
 {
 namespace serialization
 {
+template <unsigned BlockSize, storage::Ownership Ownership>
+void write(storage::io::FileWriter &writer, const util::RangeTable<BlockSize, Ownership> &table)
+{
+    writer.WriteOne(table.sum_lengths);
+    storage::serialization::write(writer, table.block_offsets);
+    storage::serialization::write(writer, table.diff_blocks);
+}
+
+template <unsigned BlockSize, storage::Ownership Ownership>
+void read(storage::io::FileReader &reader, util::RangeTable<BlockSize, Ownership> &table)
+{
+    table.sum_lengths = reader.ReadOne<unsigned>();
+    storage::serialization::read(reader, table.block_offsets);
+    storage::serialization::read(reader, table.diff_blocks);
+}
+
 template <typename T, std::size_t Bits, storage::Ownership Ownership>
 inline void read(storage::io::FileReader &reader, detail::PackedVector<T, Bits, Ownership> &vec)
 {
@@ -34,6 +51,8 @@ inline void read(storage::io::FileReader &reader, StaticGraph<EdgeDataT, Ownersh
 {
     storage::serialization::read(reader, graph.node_array);
     storage::serialization::read(reader, graph.edge_array);
+    graph.number_of_nodes = graph.node_array.size() - 1;
+    graph.number_of_edges = graph.edge_array.size();
 }
 
 template <typename EdgeDataT, storage::Ownership Ownership>
@@ -47,7 +66,7 @@ template <typename EdgeDataT>
 inline void read(storage::io::FileReader &reader, DynamicGraph<EdgeDataT> &graph)
 {
     storage::serialization::read(reader, graph.node_array);
-    auto num_edges = reader.ReadElementCount64();
+    const auto num_edges = reader.ReadElementCount64();
     graph.edge_list.resize(num_edges);
     for (auto index : irange<std::size_t>(0, num_edges))
     {

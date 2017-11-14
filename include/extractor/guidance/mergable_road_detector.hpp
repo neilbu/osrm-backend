@@ -37,6 +37,7 @@ class MergableRoadDetector
     using MergableRoadData = IntersectionShapeData;
 
     MergableRoadDetector(const util::NodeBasedDynamicGraph &node_based_graph,
+                         const EdgeBasedNodeDataContainer &node_data_container,
                          const std::vector<util::Coordinate> &node_coordinates,
                          const IntersectionGenerator &intersection_generator,
                          const CoordinateExtractor &coordinate_extractor,
@@ -77,8 +78,10 @@ class MergableRoadDetector
 
     // When it comes to merging roads, we need to find out if two ways actually represent the
     // same road. This check tries to identify roads which are the same road in opposite directions
-    bool EdgeDataSupportsMerge(const util::NodeBasedEdgeData &lhs_edge_data,
-                               const util::NodeBasedEdgeData &rhs_edge_data) const;
+    bool EdgeDataSupportsMerge(const NodeBasedEdgeClassification &lhs_flags,
+                               const NodeBasedEdgeClassification &rhs_flags,
+                               const NodeBasedEdgeAnnotation &lhs_edge_annotation,
+                               const NodeBasedEdgeAnnotation &rhs_edge_annotation) const;
 
     // Detect traffic loops.
     // Since OSRM cannot handle loop edges, we cannot directly see a connection between a node and
@@ -137,7 +140,24 @@ class MergableRoadDetector
     // The detector wants to prevent merges that are connected to `b-e`
     bool IsLinkRoad(const NodeID intersection_node, const MergableRoadData &road) const;
 
+    // The condition suppresses roads merging for intersections like
+    //             .  .
+    //           .      .
+    //       ----        ----
+    //           .      .
+    //             .  .
+    // but will allow roads merging for intersections like
+    //           -------
+    //          /       \ 
+    //      ----         ----
+    //          \       /
+    //           -------
+    bool IsCircularShape(const NodeID intersection_node,
+                         const MergableRoadData &lhs,
+                         const MergableRoadData &rhs) const;
+
     const util::NodeBasedDynamicGraph &node_based_graph;
+    const EdgeBasedNodeDataContainer &node_data_container;
     const std::vector<util::Coordinate> &node_coordinates;
     const IntersectionGenerator &intersection_generator;
     const CoordinateExtractor &coordinate_extractor;
@@ -145,6 +165,9 @@ class MergableRoadDetector
     // name detection
     const util::NameTable &name_table;
     const SuffixTable &street_name_suffix_table;
+
+    // limit for detecting circles / parallel roads
+    const static double constexpr distance_to_extract = 150;
 };
 
 } // namespace guidance

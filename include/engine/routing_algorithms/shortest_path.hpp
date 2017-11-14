@@ -1,5 +1,5 @@
-#ifndef SHORTEST_PATH_HPP
-#define SHORTEST_PATH_HPP
+#ifndef OSRM_SHORTEST_PATH_HPP
+#define OSRM_SHORTEST_PATH_HPP
 
 #include "engine/algorithm.hpp"
 #include "engine/routing_algorithms/routing_base.hpp"
@@ -14,14 +14,13 @@ namespace routing_algorithms
 {
 
 template <typename Algorithm>
-InternalRouteResult
-shortestPathSearch(SearchEngineData<Algorithm> &engine_working_data,
-                   const datafacade::ContiguousInternalMemoryDataFacade<Algorithm> &facade,
-                   const std::vector<PhantomNodes> &phantom_nodes_vector,
-                   const boost::optional<bool> continue_straight_at_waypoint);
+InternalRouteResult shortestPathSearch(SearchEngineData<Algorithm> &engine_working_data,
+                                       const DataFacade<Algorithm> &facade,
+                                       const std::vector<PhantomNodes> &phantom_nodes_vector,
+                                       const boost::optional<bool> continue_straight_at_waypoint);
 
 } // namespace routing_algorithms
 } // namespace engine
 } // namespace osrm
 
-#endif /* SHORTEST_PATH_HPP */
+#endif /* OSRM_SHORTEST_PATH_HPP */

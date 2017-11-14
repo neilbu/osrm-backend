@@ -1,8 +1,10 @@
 #include "extractor/guidance/intersection_generator.hpp"
 
 #include "extractor/geojson_debug_policies.hpp"
+
 #include "util/geojson_debug_logger.hpp"
 
+#include "util/assert.hpp"
 #include "util/bearing.hpp"
 #include "util/coordinate_calculation.hpp"
 #include "util/log.hpp"
@@ -31,12 +33,13 @@ const constexpr bool USE_HIGH_PRECISION_MODE = !USE_LOW_PRECISION_MODE;
 
 IntersectionGenerator::IntersectionGenerator(
     const util::NodeBasedDynamicGraph &node_based_graph,
+    const EdgeBasedNodeDataContainer &node_data_container,
     const RestrictionMap &restriction_map,
     const std::unordered_set<NodeID> &barrier_nodes,
     const std::vector<util::Coordinate> &coordinates,
     const CompressedEdgeContainer &compressed_edge_container)
-    : node_based_graph(node_based_graph), restriction_map(restriction_map),
-      barrier_nodes(barrier_nodes), coordinates(coordinates),
+    : node_based_graph(node_based_graph), node_data_container(node_data_container),
+      restriction_map(restriction_map), barrier_nodes(barrier_nodes), coordinates(coordinates),
       coordinate_extractor(node_based_graph, compressed_edge_container, coordinates)
 {
 }
@@ -52,23 +55,30 @@ IntersectionGenerator::ComputeIntersectionShape(const NodeID node_at_center_of_i
                                                 const boost::optional<NodeID> sorting_base,
                                                 const bool use_low_precision_angles) const
 {
-    IntersectionShape intersection;
-    // reserve enough items (+ the possibly missing u-turn edge)
     const auto intersection_degree = node_based_graph.GetOutDegree(node_at_center_of_intersection);
-    intersection.reserve(intersection_degree);
     const util::Coordinate turn_coordinate = coordinates[node_at_center_of_intersection];
+
+    // compute bearings in a relatively small circle to prevent wrong roads order with true bearings
+    struct RoadWithInitialBearing
+    {
+        double bearing;
+        IntersectionShapeData road;
+    };
+    std::vector<RoadWithInitialBearing> initial_roads_ordering;
+    // reserve enough items (+ the possibly missing u-turn edge)
+    initial_roads_ordering.reserve(intersection_degree);
 
     // number of lanes at the intersection changes how far we look down the road
     const auto edge_range = node_based_graph.GetAdjacentEdgeRange(node_at_center_of_intersection);
-    const auto max_lanes_intersection = std::accumulate(
-        edge_range.begin(),
-        edge_range.end(),
-        std::uint8_t{0},
-        [this](const auto current_max, const auto current_eid) {
-            return std::max(
-                current_max,
-                node_based_graph.GetEdgeData(current_eid).road_classification.GetNumberOfLanes());
-        });
+    const auto max_lanes_intersection =
+        std::accumulate(edge_range.begin(),
+                        edge_range.end(),
+                        std::uint8_t{0},
+                        [this](const auto current_max, const auto current_eid) {
+                            return std::max(current_max,
+                                            node_based_graph.GetEdgeData(current_eid)
+                                                .flags.road_classification.GetNumberOfLanes());
+                        });
 
     for (const EdgeID edge_connected_to_intersection :
          node_based_graph.GetAdjacentEdgeRange(node_at_center_of_intersection))
@@ -79,6 +89,11 @@ IntersectionGenerator::ComputeIntersectionShape(const NodeID node_at_center_of_i
 
         auto coordinates = coordinate_extractor.GetCoordinatesAlongRoad(
             node_at_center_of_intersection, edge_connected_to_intersection, !INVERT, to_node);
+
+        const auto close_coordinate =
+            coordinate_extractor.ExtractCoordinateAtLength(2. /*m*/, coordinates);
+        const auto initial_bearing =
+            util::coordinate_calculation::bearing(turn_coordinate, close_coordinate);
 
         const auto segment_length = util::coordinate_calculation::getLength(
             coordinates.begin(),
@@ -121,30 +136,79 @@ IntersectionGenerator::ComputeIntersectionShape(const NodeID node_at_center_of_i
             BOOST_ASSERT(std::abs(bearing) <= 0.1);
         }
 
-        intersection.push_back({edge_connected_to_intersection, bearing, segment_length});
+        initial_roads_ordering.push_back(
+            {initial_bearing, {edge_connected_to_intersection, bearing, segment_length}});
     }
 
-    if (!intersection.empty())
+    if (!initial_roads_ordering.empty())
     {
-        const auto base_bearing = [&]() {
+        const auto base_initial_bearing = [&]() {
             if (sorting_base)
             {
-                const auto itr =
-                    std::find_if(intersection.begin(),
-                                 intersection.end(),
-                                 [&](const IntersectionShapeData &data) {
-                                     return node_based_graph.GetTarget(data.eid) == *sorting_base;
-                                 });
-                if (itr != intersection.end())
+                const auto itr = std::find_if(initial_roads_ordering.begin(),
+                                              initial_roads_ordering.end(),
+                                              [&](const auto &data) {
+                                                  return node_based_graph.GetTarget(
+                                                             data.road.eid) == *sorting_base;
+                                              });
+                if (itr != initial_roads_ordering.end())
                     return util::bearing::reverse(itr->bearing);
             }
-            return util::bearing::reverse(intersection.begin()->bearing);
+            return util::bearing::reverse(initial_roads_ordering.begin()->bearing);
         }();
-        std::sort(intersection.begin(),
-                  intersection.end(),
-                  makeCompareShapeDataAngleToBearing(base_bearing));
+
+        // sort roads with respect to the initial bearings, a tie-breaker for equal initial bearings
+        // is to order roads via final bearings to have roads in clockwise order
+        //
+        //  rhs   <---.                        lhs   <----.
+        //           /                                   /
+        //    lhs   /                             rhs   /
+        //
+        //  lhs road is before rhs one         rhs road is before lhs one
+        //  bearing::angleBetween < 180        bearing::angleBetween > 180
+        const auto initial_bearing_order = makeCompareShapeDataAngleToBearing(base_initial_bearing);
+        std::sort(initial_roads_ordering.begin(),
+                  initial_roads_ordering.end(),
+                  [&initial_bearing_order](const auto &lhs, const auto &rhs) {
+                      return initial_bearing_order(lhs, rhs) ||
+                             (lhs.bearing == rhs.bearing &&
+                              util::bearing::angleBetween(lhs.road.bearing, rhs.road.bearing) <
+                                  180);
+                  });
+
+        // copy intersection data in the initial order
+        IntersectionShape intersection;
+        intersection.reserve(initial_roads_ordering.size());
+        std::transform(initial_roads_ordering.begin(),
+                       initial_roads_ordering.end(),
+                       std::back_inserter(intersection),
+                       [](const auto &entry) { return entry.road; });
+
+        if (intersection.size() > 2)
+        { // Check bearings ordering with respect to true bearings
+            const auto base_bearing = intersection.front().bearing;
+            const auto bearings_order =
+                makeCompareShapeDataAngleToBearing(util::bearing::reverse(base_bearing));
+            for (auto curr = intersection.begin(), next = std::next(curr);
+                 next != intersection.end();
+                 ++curr, ++next)
+            {
+                if (bearings_order(*next, *curr))
+                { // If the true bearing is out of the initial order (next before current) then
+                    // adjust the next bearing to keep the order. The adjustment angle is at most
+                    // 0.5° or a half-angle between the current bearing and the base bearing.
+                    // to prevent overlapping over base bearing + 360°.
+                    const auto angle_adjustment = std::min(
+                        .5, util::restrictAngleToValidRange(base_bearing - curr->bearing) / 2.);
+                    next->bearing =
+                        util::restrictAngleToValidRange(curr->bearing + angle_adjustment);
+                }
+            }
+        }
+        return intersection;
     }
-    return intersection;
+
+    return IntersectionShape{};
 }
 
 //                                               a
@@ -202,9 +266,11 @@ IntersectionGenerator::SkipDegreeTwoNodes(const NodeID starting_node, const Edge
         query_node = next_node;
         query_edge = next_edge;
 
-        if (!node_based_graph.GetEdgeData(query_edge)
-                 .IsCompatibleTo(node_based_graph.GetEdgeData(next_edge)) ||
-            node_based_graph.GetTarget(next_edge) == starting_node)
+        // check if there is a relevant change in the graph
+        if (!CanBeCompressed(node_based_graph.GetEdgeData(query_edge),
+                             node_based_graph.GetEdgeData(next_edge),
+                             node_data_container) ||
+            (node_based_graph.GetTarget(next_edge) == starting_node))
             break;
     }
 
@@ -233,8 +299,25 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
 {
     const auto node_at_intersection = node_based_graph.GetTarget(entering_via_edge);
 
-    // check if there is a single valid turn entering the current intersection
-    const auto only_valid_turn = GetOnlyAllowedTurnIfExistent(previous_node, node_at_intersection);
+    // request all turn restrictions
+    auto const restrictions = restriction_map.Restrictions(previous_node, node_at_intersection);
+
+    // check turn restrictions to find a node that is the only allowed target when coming from a
+    // node to an intersection
+    //     d
+    //     |
+    // a - b - c  and `only_straight_on ab | bc would return `c` for `a,b`
+    const auto find_only_valid_turn = [&]() -> boost::optional<NodeID> {
+        const auto itr = std::find_if(restrictions.first, restrictions.second, [](auto pair) {
+            return pair.second->is_only;
+        });
+        if (itr != restrictions.second)
+            return itr->second->AsNodeRestriction().to;
+        else
+            return boost::none;
+    };
+
+    const auto only_valid_turn = find_only_valid_turn();
 
     // barriers change our behaviour regarding u-turns
     const bool is_barrier_node = barrier_nodes.find(node_at_intersection) != barrier_nodes.end();
@@ -255,12 +338,14 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
 
     const auto is_restricted = [&](const NodeID destination) {
         // check if we have a dedicated destination
-        if (only_valid_turn && *only_valid_turn != destination)
-            return true;
+        if (only_valid_turn)
+            return *only_valid_turn != destination;
 
-        // not explicitly forbidden
-        return restriction_map.CheckIfTurnIsRestricted(
-            previous_node, node_at_intersection, destination);
+        // check if explicitly forbidden
+        return restrictions.second !=
+               std::find_if(restrictions.first, restrictions.second, [&](const auto &restriction) {
+                   return restriction.second->AsNodeRestriction().to == destination;
+               });
     };
 
     const auto is_allowed_turn = [&](const IntersectionShapeData &road) {
@@ -278,7 +363,8 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
     };
 
     // due to merging of roads, the u-turn might actually not be part of the intersection anymore
-    const auto uturn_bearing = [&]() {
+    // uturn is a pair of {edge id, bearing}
+    const auto uturn = [&]() {
         const auto merge_entry = std::find_if(
             performed_merges.begin(), performed_merges.end(), [&uturn_edge_itr](const auto entry) {
                 return entry.merged_eid == uturn_edge_itr->eid;
@@ -291,7 +377,8 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
                 normalized_intersection.end(),
                 [&](const IntersectionShapeData &road) { return road.eid == merged_into_id; });
             BOOST_ASSERT(merged_u_turn != normalized_intersection.end());
-            return util::bearing::reverse(merged_u_turn->bearing);
+            return std::make_pair(merged_u_turn->eid,
+                                  util::bearing::reverse(merged_u_turn->bearing));
         }
         else
         {
@@ -301,7 +388,9 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
                              connect_to_previous_node);
             BOOST_ASSERT(uturn_edge_at_normalized_intersection_itr !=
                          normalized_intersection.end());
-            return util::bearing::reverse(uturn_edge_at_normalized_intersection_itr->bearing);
+            return std::make_pair(
+                uturn_edge_at_normalized_intersection_itr->eid,
+                util::bearing::reverse(uturn_edge_at_normalized_intersection_itr->bearing));
         }
     }();
 
@@ -314,7 +403,7 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
                        return IntersectionViewData(
                            road,
                            is_allowed_turn(road),
-                           util::bearing::angleBetween(uturn_bearing, road.bearing));
+                           util::bearing::angleBetween(uturn.second, road.bearing));
                    });
 
     const auto uturn_edge_at_intersection_view_itr =
@@ -369,30 +458,24 @@ IntersectionView IntersectionGenerator::TransformIntersectionShapeIntoView(
               std::end(intersection_view),
               std::mem_fn(&IntersectionViewData::CompareByAngle));
 
-    BOOST_ASSERT(intersection_view[0].angle >= 0. &&
-                 intersection_view[0].angle < std::numeric_limits<double>::epsilon());
+    // Move entering_via_edge to intersection front and place all roads prior entering_via_edge
+    // at the end of the intersection view with 360° angle
+    auto entering_via_it = std::find_if(intersection_view.begin(),
+                                        intersection_view.end(),
+                                        [&uturn](auto &road) { return road.eid == uturn.first; });
+
+    OSRM_ASSERT(entering_via_it != intersection_view.end() && entering_via_it->angle >= 0. &&
+                    entering_via_it->angle < std::numeric_limits<double>::epsilon(),
+                coordinates[node_at_intersection]);
+
+    if (entering_via_it != intersection_view.begin() && entering_via_it != intersection_view.end())
+    {
+        std::for_each(
+            intersection_view.begin(), entering_via_it, [](auto &road) { road.angle = 360.; });
+        std::rotate(intersection_view.begin(), entering_via_it, intersection_view.end());
+    }
 
     return intersection_view;
-}
-
-boost::optional<NodeID>
-IntersectionGenerator::GetOnlyAllowedTurnIfExistent(const NodeID coming_from_node,
-                                                    const NodeID node_at_intersection) const
-{
-    // If only restrictions refer to invalid ways somewhere far away, we rather ignore the
-    // restriction than to not route over the intersection at all.
-    const auto only_restriction_to_node =
-        restriction_map.CheckForEmanatingIsOnlyTurn(coming_from_node, node_at_intersection);
-    if (only_restriction_to_node != SPECIAL_NODEID)
-    {
-        // if the mentioned node does not exist anymore, we don't return it. This checks for broken
-        // turn restrictions
-        for (const auto onto_edge : node_based_graph.GetAdjacentEdgeRange(node_at_intersection))
-            if (only_restriction_to_node == node_based_graph.GetTarget(onto_edge))
-                return only_restriction_to_node;
-    }
-    // Ignore broken only restrictions.
-    return boost::none;
 }
 
 const CoordinateExtractor &IntersectionGenerator::GetCoordinateExtractor() const

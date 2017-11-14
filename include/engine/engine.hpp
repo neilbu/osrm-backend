@@ -13,7 +13,6 @@
 #include "engine/datafacade/contiguous_block_allocator.hpp"
 #include "engine/datafacade_provider.hpp"
 #include "engine/engine_config.hpp"
-#include "engine/engine_config.hpp"
 #include "engine/plugins/match.hpp"
 #include "engine/plugins/nearest.hpp"
 #include "engine/plugins/table.hpp"
@@ -62,14 +61,14 @@ template <typename Algorithm> class Engine final : public EngineInterface
 {
   public:
     explicit Engine(const EngineConfig &config)
-        : route_plugin(config.max_locations_viaroute),       //
-          table_plugin(config.max_locations_distance_table), //
+        : route_plugin(config.max_locations_viaroute, config.max_alternatives), //
+          table_plugin(config.max_locations_distance_table),                    //
           matrix_plugin(config.max_locations_distance_table), //
           journey_plugin(config.max_locations_distance_table), //
-          nearest_plugin(config.max_results_nearest),        //
-          trip_plugin(config.max_locations_trip),            //
-          match_plugin(config.max_locations_map_matching),   //
-          tile_plugin()                                      //
+          nearest_plugin(config.max_results_nearest),                           //
+          trip_plugin(config.max_locations_trip),                               //
+          match_plugin(config.max_locations_map_matching),                      //
+          tile_plugin()                                                         //
 
     {
         if (config.use_shared_memory)
@@ -96,68 +95,56 @@ template <typename Algorithm> class Engine final : public EngineInterface
     Status Route(const api::RouteParameters &params,
                  util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return route_plugin.HandleRequest(*facade, algorithms, params, result);
+        return route_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Table(const api::TableParameters &params,
                  util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return table_plugin.HandleRequest(*facade, algorithms, params, result);
+        return table_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Matrix(const api::MatrixParameters &params,
                  util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return matrix_plugin.HandleRequest(*facade, algorithms, params, result);
+        return matrix_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Journey(const api::JourneyParameters &params,
                  util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return journey_plugin.HandleRequest(*facade, algorithms, params, result);
+        return journey_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Nearest(const api::NearestParameters &params,
                    util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return nearest_plugin.HandleRequest(*facade, algorithms, params, result);
+        return nearest_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Trip(const api::TripParameters &params, util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return trip_plugin.HandleRequest(*facade, algorithms, params, result);
+        return trip_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Match(const api::MatchParameters &params,
                  util::json::Object &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return match_plugin.HandleRequest(*facade, algorithms, params, result);
+        return match_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
     Status Tile(const api::TileParameters &params, std::string &result) const override final
     {
-        auto facade = facade_provider->Get();
-        auto algorithms = RoutingAlgorithms<Algorithm>{heaps, *facade};
-        return tile_plugin.HandleRequest(*facade, algorithms, params, result);
+        return tile_plugin.HandleRequest(GetAlgorithms(params), params, result);
     }
 
-    static bool CheckCompability(const EngineConfig &config);
+    static bool CheckCompatibility(const EngineConfig &config);
 
   private:
+    template <typename ParametersT> auto GetAlgorithms(const ParametersT &params) const
+    {
+        return RoutingAlgorithms<Algorithm>{heaps, facade_provider->Get(params)};
+    }
     std::unique_ptr<DataFacadeProvider<Algorithm>> facade_provider;
     mutable SearchEngineData<Algorithm> heaps;
 
@@ -172,7 +159,7 @@ template <typename Algorithm> class Engine final : public EngineInterface
 };
 
 template <>
-bool Engine<routing_algorithms::ch::Algorithm>::CheckCompability(const EngineConfig &config)
+bool Engine<routing_algorithms::ch::Algorithm>::CheckCompatibility(const EngineConfig &config)
 {
     if (config.use_shared_memory)
     {
@@ -187,24 +174,19 @@ bool Engine<routing_algorithms::ch::Algorithm>::CheckCompability(const EngineCon
     }
     else
     {
-        std::ifstream in(config.storage_config.hsgr_data_path.string().c_str());
-        if (!in)
+        if (!boost::filesystem::exists(config.storage_config.GetPath(".osrm.hsgr")))
             return false;
+        storage::io::FileReader in(config.storage_config.GetPath(".osrm.hsgr"),
+                                   storage::io::FileReader::VerifyFingerprint);
 
-        in.seekg(0, std::ios::end);
-        auto size = in.tellg();
+        auto size = in.GetSize();
         return size > 0;
     }
 }
 
 template <>
-bool Engine<routing_algorithms::corech::Algorithm>::CheckCompability(const EngineConfig &config)
+bool Engine<routing_algorithms::mld::Algorithm>::CheckCompatibility(const EngineConfig &config)
 {
-    if (!Engine<routing_algorithms::ch::Algorithm>::CheckCompability(config))
-    {
-        return false;
-    }
-
     if (config.use_shared_memory)
     {
         storage::SharedMonitor<storage::SharedDataTimestamp> barrier;
@@ -213,19 +195,34 @@ bool Engine<routing_algorithms::corech::Algorithm>::CheckCompability(const Engin
 
         auto mem = storage::makeSharedMemory(barrier.data().region);
         auto layout = reinterpret_cast<storage::DataLayout *>(mem->Ptr());
-        return layout->GetBlockSize(storage::DataLayout::CH_CORE_MARKER) >
-               sizeof(std::uint64_t) + sizeof(util::FingerPrint);
+        // checks that all the needed memory blocks are populated
+        // DataLayout::MLD_CELL_SOURCE_BOUNDARY and DataLayout::MLD_CELL_DESTINATION_BOUNDARY
+        // are not checked, because in situations where there are so few nodes in the graph that
+        // they all fit into one cell, they can be empty.
+        bool empty_data = layout->GetBlockSize(storage::DataLayout::MLD_LEVEL_DATA) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_PARTITION) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_CELL_TO_CHILDREN) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_CELLS) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_CELL_LEVEL_OFFSETS) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_GRAPH_NODE_LIST) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_GRAPH_EDGE_LIST) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_CELL_WEIGHTS_0) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_CELL_DURATIONS_0) > 0 &&
+                          layout->GetBlockSize(storage::DataLayout::MLD_GRAPH_NODE_TO_OFFSET) > 0;
+        return empty_data;
     }
     else
     {
-        std::ifstream in(config.storage_config.core_data_path.string().c_str());
-        if (!in)
+        if (!boost::filesystem::exists(config.storage_config.GetPath(".osrm.partition")) ||
+            !boost::filesystem::exists(config.storage_config.GetPath(".osrm.cells")) ||
+            !boost::filesystem::exists(config.storage_config.GetPath(".osrm.mldgr")) ||
+            !boost::filesystem::exists(config.storage_config.GetPath(".osrm.cell_metrics")))
             return false;
+        storage::io::FileReader in(config.storage_config.GetPath(".osrm.partition"),
+                                   storage::io::FileReader::VerifyFingerprint);
 
-        in.seekg(0, std::ios::end);
-        std::size_t size = in.tellg();
-        // An empty core files is only the 8 byte size header plus the 8 byte Fingerprint.
-        return size > sizeof(std::uint64_t) + sizeof(util::FingerPrint);
+        auto size = in.GetSize();
+        return size > 0;
     }
 }
 }

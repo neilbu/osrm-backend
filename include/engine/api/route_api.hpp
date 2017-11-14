@@ -41,26 +41,27 @@ class RouteAPI : public BaseAPI
     {
     }
 
-    void MakeResponse(const InternalRouteResult &raw_route, util::json::Object &response) const
+    void MakeResponse(const InternalManyRoutesResult &raw_routes,
+                      util::json::Object &response) const
     {
-        auto number_of_routes = raw_route.has_alternative() ? 2UL : 1UL;
-        util::json::Array routes;
-        routes.values.resize(number_of_routes);
-        routes.values[0] = MakeRoute(raw_route.segment_end_coordinates,
-                                     raw_route.unpacked_path_segments,
-                                     raw_route.source_traversed_in_reverse,
-                                     raw_route.target_traversed_in_reverse);
-        if (raw_route.has_alternative())
+        BOOST_ASSERT(!raw_routes.routes.empty());
+
+        util::json::Array jsRoutes;
+
+        for (const auto &route : raw_routes.routes)
         {
-            std::vector<std::vector<PathData>> wrapped_leg(1);
-            wrapped_leg.front() = std::move(raw_route.unpacked_alternative);
-            routes.values[1] = MakeRoute(raw_route.segment_end_coordinates,
-                                         wrapped_leg,
-                                         raw_route.alt_source_traversed_in_reverse,
-                                         raw_route.alt_target_traversed_in_reverse);
+            if (!route.is_valid())
+                continue;
+
+            jsRoutes.values.push_back(MakeRoute(route.segment_end_coordinates,
+                                                route.unpacked_path_segments,
+                                                route.source_traversed_in_reverse,
+                                                route.target_traversed_in_reverse));
         }
-        response.values["waypoints"] = BaseAPI::MakeWaypoints(raw_route.segment_end_coordinates);
-        response.values["routes"] = std::move(routes);
+
+        response.values["waypoints"] =
+            BaseAPI::MakeWaypoints(raw_routes.routes[0].segment_end_coordinates);
+        response.values["routes"] = std::move(jsRoutes);
         response.values["code"] = "Ok";
     }
 
@@ -164,19 +165,22 @@ class RouteAPI : public BaseAPI
                  * to find a via point.
                  * The same exit will be emitted, though, if we should start routing at S, making
                  * the overall response consistent.
+                 *
+                 * ⚠ CAUTION: order of post-processing steps is important
+                 *    - handleRoundabouts must be called before collapseTurnInstructions that
+                 *      expects post-processed roundabouts
                  */
 
                 guidance::trimShortSegments(steps, leg_geometry);
-                leg.steps = guidance::collapseTurnInstructions(std::move(steps));
-                leg.steps = guidance::postProcess(std::move(leg.steps));
+                leg.steps = guidance::handleRoundabouts(std::move(steps));
+                leg.steps = guidance::collapseTurnInstructions(std::move(leg.steps));
+                leg.steps = guidance::anticipateLaneChange(std::move(leg.steps));
                 leg.steps = guidance::buildIntersections(std::move(leg.steps));
                 leg.steps = guidance::suppressShortNameSegments(std::move(leg.steps));
                 leg.steps = guidance::assignRelativeLocations(std::move(leg.steps),
                                                               leg_geometry,
                                                               phantoms.source_phantom,
                                                               phantoms.target_phantom);
-                leg.steps = guidance::anticipateLaneChange(std::move(leg.steps));
-                leg.steps = guidance::collapseUseLane(std::move(leg.steps));
                 leg_geometry = guidance::resyncGeometry(std::move(leg_geometry), leg.steps);
             }
 

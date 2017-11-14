@@ -53,7 +53,7 @@ double findTotalTurnAngle(const RouteStep &entry_step, const RouteStep &exit_ste
     // both angles are in the same direction, the total turn gets increased
     // 
     // a ---- b
-    //           \
+    //           \ 
     //              c
     //              |
     //              d
@@ -158,6 +158,18 @@ void TransferTurnTypeStrategy::operator()(RouteStep &step_at_turn_location,
 void AdjustToCombinedTurnAngleStrategy::operator()(RouteStep &step_at_turn_location,
                                                    const RouteStep &transfer_from_step) const
 {
+    // Forks point to left/right. By doing a combined angle, we would risk ending up with
+    // unreasonable fork instrucitons. The direction of a fork only depends on the forking location,
+    // not further angles coming up
+    //
+    //          d
+    //       .  c
+    // a - b
+    //
+    // could end up as `fork left` for `a-b-c`, instead of fork-right
+    if (hasTurnType(step_at_turn_location, TurnType::Fork))
+        return;
+
     // TODO assert transfer_from_step == step_at_turn_location + 1
     const auto angle = findTotalTurnAngle(step_at_turn_location, transfer_from_step);
     step_at_turn_location.maneuver.instruction.direction_modifier = getTurnDirection(angle);
@@ -173,7 +185,21 @@ void AdjustToCombinedTurnStrategy::operator()(RouteStep &step_at_turn_location,
                                               const RouteStep &transfer_from_step) const
 {
     const auto angle = findTotalTurnAngle(step_at_turn_location, transfer_from_step);
-    const auto new_modifier = getTurnDirection(angle);
+
+    // Forks and merges point to left/right. By doing a combined angle, we would risk ending up with
+    // unreasonable fork instrucitons. The direction of a fork or a merge only depends on the
+    // location,
+    // not further angles coming up
+    //
+    //          d
+    //       .  c
+    // a - b
+    //
+    // could end up as `fork left` for `a-b-c`, instead of fork-right
+    const auto new_modifier = hasTurnType(step_at_turn_location, TurnType::Fork) ||
+                                      hasTurnType(step_at_turn_location, TurnType::Merge)
+                                  ? step_at_turn_location.maneuver.instruction.direction_modifier
+                                  : getTurnDirection(angle);
 
     // a turn that is a new name or straight (turn/continue)
     const auto is_non_turn = [](const RouteStep &step) {
@@ -315,10 +341,11 @@ RouteSteps collapseTurnInstructions(RouteSteps steps)
         if (entersRoundabout(current_step->maneuver.instruction) ||
             staysOnRoundabout(current_step->maneuver.instruction))
         {
-            // Skip over all instructions within the roundabout
-            for (; current_step + 1 != steps.end(); ++current_step)
-                if (leavesRoundabout(current_step->maneuver.instruction))
-                    break;
+            // If postProcess is called before then all corresponding leavesRoundabout steps are
+            // removed and the current roundabout step can be ignored by directly proceeding to
+            // the next step.
+            // If postProcess is not called before then all steps till the next leavesRoundabout
+            // step must be skipped to prevent incorrect roundabouts post-processing.
 
             // are we done for good?
             if (current_step + 1 == steps.end())

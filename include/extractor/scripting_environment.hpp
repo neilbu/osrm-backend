@@ -19,6 +19,7 @@ namespace osmium
 {
 class Node;
 class Way;
+class Relation;
 }
 
 namespace osrm
@@ -33,6 +34,7 @@ namespace extractor
 {
 
 class RestrictionParser;
+class ExtractionRelationContainer;
 struct ExtractionNode;
 struct ExtractionWay;
 struct ExtractionTurn;
@@ -52,19 +54,23 @@ class ScriptingEnvironment
 
     virtual const ProfileProperties &GetProfileProperties() = 0;
 
+    virtual std::vector<std::vector<std::string>> GetExcludableClasses() = 0;
+    virtual std::vector<std::string> GetClassNames() = 0;
     virtual std::vector<std::string> GetNameSuffixList() = 0;
     virtual std::vector<std::string> GetRestrictions() = 0;
-    virtual void SetupSources() = 0;
+    virtual std::vector<std::string> GetRelations() = 0;
     virtual void ProcessTurn(ExtractionTurn &turn) = 0;
     virtual void ProcessSegment(ExtractionSegment &segment) = 0;
 
     virtual void
-    ProcessElements(const std::vector<osmium::memory::Buffer::const_iterator> &osm_elements,
+    ProcessElements(const osmium::memory::Buffer &buffer,
                     const RestrictionParser &restriction_parser,
-                    tbb::concurrent_vector<std::pair<std::size_t, ExtractionNode>> &resulting_nodes,
-                    tbb::concurrent_vector<std::pair<std::size_t, ExtractionWay>> &resulting_ways,
-                    tbb::concurrent_vector<boost::optional<InputRestrictionContainer>>
-                        &resulting_restrictions) = 0;
+                    const ExtractionRelationContainer &relations,
+                    std::vector<std::pair<const osmium::Node &, ExtractionNode>> &resulting_nodes,
+                    std::vector<std::pair<const osmium::Way &, ExtractionWay>> &resulting_ways,
+                    std::vector<InputConditionalTurnRestriction> &resulting_restrictions) = 0;
+
+    virtual bool HasLocationDependentData() const = 0;
 };
 }
 }

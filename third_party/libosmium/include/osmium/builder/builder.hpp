@@ -35,16 +35,12 @@ DEALINGS IN THE SOFTWARE.
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <new>
-#include <string>
-#include <type_traits>
 
 #include <osmium/memory/buffer.hpp>
 #include <osmium/memory/item.hpp>
-#include <osmium/osm/types.hpp>
-#include <osmium/util/cast.hpp>
 #include <osmium/util/compatibility.hpp>
 
 namespace osmium {
@@ -62,7 +58,7 @@ namespace osmium {
 
             osmium::memory::Buffer& m_buffer;
             Builder* m_parent;
-            size_t m_item_offset;
+            std::size_t m_item_offset;
 
             Builder(const Builder&) = delete;
             Builder(Builder&&) = delete;
@@ -101,7 +97,7 @@ namespace osmium {
                 return *reinterpret_cast<osmium::memory::Item*>(m_buffer.data() + m_item_offset);
             }
 
-            unsigned char* reserve_space(size_t size) {
+            unsigned char* reserve_space(std::size_t size) {
                 return m_buffer.reserve_space(size);
             }
 
@@ -119,7 +115,9 @@ namespace osmium {
              *
              */
             void add_padding(bool self = false) {
-                const auto padding = osmium::memory::align_bytes - (size() % osmium::memory::align_bytes);
+                // We know the padding is only a very small number, so it will
+                // always fit.
+                const auto padding = static_cast<osmium::memory::item_size_type>(osmium::memory::align_bytes - (size() % osmium::memory::align_bytes));
                 if (padding != osmium::memory::align_bytes) {
                     std::fill_n(reserve_space(padding), padding, 0);
                     if (self) {
@@ -131,7 +129,7 @@ namespace osmium {
                 }
             }
 
-            void add_size(uint32_t size) {
+            void add_size(osmium::memory::item_size_type size) {
                 item().add_size(size);
                 if (m_parent) {
                     m_parent->add_size(size);
@@ -168,6 +166,20 @@ namespace osmium {
             }
 
             /**
+             * Append data to buffer and append an additional \0.
+             *
+             * @param data Pointer to data.
+             * @param length Length of data in bytes.
+             * @returns The number of bytes appended (length + 1).
+             */
+            osmium::memory::item_size_type append_with_zero(const char* data, const osmium::memory::item_size_type length) {
+                unsigned char* target = reserve_space(length + 1);
+                std::copy_n(reinterpret_cast<const unsigned char*>(data), length, target);
+                target[length] = '\0';
+                return length + 1;
+            }
+
+            /**
              * Append \0-terminated string to buffer.
              *
              * @param str \0-terminated string.
@@ -180,9 +192,11 @@ namespace osmium {
             /**
              * Append '\0' to the buffer.
              *
+             * @deprecated Use append_with_zero() instead.
+             *
              * @returns The number of bytes appended (always 1).
              */
-            osmium::memory::item_size_type append_zero() {
+            OSMIUM_DEPRECATED osmium::memory::item_size_type append_zero() {
                 *reserve_space(1) = '\0';
                 return 1;
             }

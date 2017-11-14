@@ -26,6 +26,33 @@ Feature: Penalties
             | a    | c  | abc,abc | 20s +-1 | 200m +-1 |
             | d    | f  | def,def | 27s +-1 | 200m +-1 |
 
+    # Penalties not on the phantom nodes
+    Scenario: Traffic signals should incur a delay, without changing distance
+        Given the node map
+            """
+            a b c d e
+            f g h i j
+            """
+
+        And the nodes
+            | node | highway         |
+            | c    | traffic_signals |
+
+        And the ways
+            | nodes |
+            | ab    |
+            | bcd   |
+            | de    |
+            | fg    |
+            | ghi   |
+            | ij    |
+
+        When I route I should get
+            | from | to | route     | time    | distance |
+            | a    | e  | ab,bcd,de | 47s +-1 | 400m +-1 |
+            | f    | j  | fg,ghi,ij | 40s +-1 | 400m +-1 |
+
+
     Scenario: Signal penalty should not depend on way type
         Given the node map
             """
@@ -72,55 +99,35 @@ Feature: Penalties
             | from | to | route       | time    |
             | a    | e  | abcde,abcde | 61s +-1 |
 
-        @todo
-        Scenario: Signal penalty should not depend on way type
-            Given the node map
-                """
-                a b c
-                d e f
-                g h i
-                """
+    @todo
+    Scenario: Signal penalty should not depend on way type
+        Given the node map
+            """
+            a b c
+            d e f
+            g h i
+            """
 
-            And the nodes
-                | node | highway         |
-                | b    | traffic_signals |
-                | e    | traffic_signals |
-                | h    | traffic_signals |
+        And the nodes
+            | node | highway         |
+            | b    | traffic_signals |
+            | e    | traffic_signals |
+            | h    | traffic_signals |
 
-            And the ways
-                | nodes | highway   |
-                | abc   | primary   |
-                | def   | secondary |
-                | ghi   | tertiary  |
+        And the ways
+            | nodes | highway   |
+            | abc   | primary   |
+            | def   | secondary |
+            | ghi   | tertiary  |
 
-            When I route I should get
-                | from | to | route   | time    |
-                | a    | b  | abc,abc | 10s +-1 |
-                | a    | c  | abc,abc | 27s +-1 |
-                | d    | e  | def,def | 20s +-1 |
-                | d    | f  | def,def | 47s +-1 |
-                | g    | h  | ghi,ghi | 30s +-1 |
-                | g    | i  | ghi,ghi | 67s +-1 |
-
-        Scenario: Passing multiple traffic signals should incur a accumulated delay
-            Given the node map
-                """
-                a b c d e
-                """
-
-            And the nodes
-                | node | highway         |
-                | b    | traffic_signals |
-                | c    | traffic_signals |
-                | d    | traffic_signals |
-
-            And the ways
-                | nodes |
-                | abcde |
-
-            When I route I should get
-                | from | to | route       | time    |
-                | a    | e  | abcde,abcde | 61s +-1 |
+        When I route I should get
+            | from | to | route   | time    |
+            | a    | b  | abc,abc | 10s +-1 |
+            | a    | c  | abc,abc | 27s +-1 |
+            | d    | e  | def,def | 20s +-1 |
+            | d    | f  | def,def | 47s +-1 |
+            | g    | h  | ghi,ghi | 30s +-1 |
+            | g    | i  | ghi,ghi | 67s +-1 |
 
     @todo
     Scenario: Starting or ending at a traffic signal should not incur a delay

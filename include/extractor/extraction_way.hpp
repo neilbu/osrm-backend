@@ -46,29 +46,36 @@ struct ExtractionWay
         backward_rate = -1;
         duration = -1;
         weight = -1;
-        roundabout = false;
-        circular = false;
-        is_startpoint = true;
         name.clear();
-        ref.clear();
+        forward_ref.clear();
+        backward_ref.clear();
         pronunciation.clear();
         destinations.clear();
-        forward_travel_mode = TRAVEL_MODE_INACCESSIBLE;
-        backward_travel_mode = TRAVEL_MODE_INACCESSIBLE;
+        exits.clear();
         turn_lanes_forward.clear();
         turn_lanes_backward.clear();
         road_classification = guidance::RoadClassification();
-        backward_restricted = false;
+        forward_travel_mode = extractor::TRAVEL_MODE_INACCESSIBLE;
+        backward_travel_mode = extractor::TRAVEL_MODE_INACCESSIBLE;
+        roundabout = false;
+        circular = false;
+        is_startpoint = true;
         forward_restricted = false;
+        backward_restricted = false;
+        is_left_hand_driving = false;
     }
 
     // wrappers to allow assigning nil (nullptr) to string values
     void SetName(const char *value) { detail::maybeSetString(name, value); }
     const char *GetName() const { return name.c_str(); }
-    void SetRef(const char *value) { detail::maybeSetString(ref, value); }
-    const char *GetRef() const { return ref.c_str(); }
+    void SetForwardRef(const char *value) { detail::maybeSetString(forward_ref, value); }
+    const char *GetForwardRef() const { return forward_ref.c_str(); }
+    void SetBackwardRef(const char *value) { detail::maybeSetString(backward_ref, value); }
+    const char *GetBackwardRef() const { return backward_ref.c_str(); }
     void SetDestinations(const char *value) { detail::maybeSetString(destinations, value); }
     const char *GetDestinations() const { return destinations.c_str(); }
+    void SetExits(const char *value) { detail::maybeSetString(exits, value); }
+    const char *GetExits() const { return exits.c_str(); }
     void SetPronunciation(const char *value) { detail::maybeSetString(pronunciation, value); }
     const char *GetPronunciation() const { return pronunciation.c_str(); }
     void SetTurnLanesForward(const char *value)
@@ -82,6 +89,10 @@ struct ExtractionWay
     }
     const char *GetTurnLanesBackward() const { return turn_lanes_backward.c_str(); }
 
+    // markers for determining user-defined classes for each way
+    std::unordered_map<std::string, bool> forward_classes;
+    std::unordered_map<std::string, bool> backward_classes;
+
     // speed in km/h
     double forward_speed;
     double backward_speed;
@@ -93,19 +104,25 @@ struct ExtractionWay
     // weight of the whole way in both directions
     double weight;
     std::string name;
-    std::string ref;
+    std::string forward_ref;
+    std::string backward_ref;
     std::string pronunciation;
     std::string destinations;
+    std::string exits;
     std::string turn_lanes_forward;
     std::string turn_lanes_backward;
     guidance::RoadClassification road_classification;
-    TravelMode forward_travel_mode : 4;
-    TravelMode backward_travel_mode : 4;
+    extractor::TravelMode forward_travel_mode : 4;
+    extractor::TravelMode backward_travel_mode : 4;
+
+    // Boolean flags
     bool roundabout : 1;
     bool circular : 1;
     bool is_startpoint : 1;
     bool forward_restricted : 1;
     bool backward_restricted : 1;
+    bool is_left_hand_driving : 1;
+    bool : 2;
 };
 }
 }

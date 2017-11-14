@@ -1,7 +1,6 @@
 #ifndef FIRST_AND_LAST_SEGMENT_OF_WAY_HPP
 #define FIRST_AND_LAST_SEGMENT_OF_WAY_HPP
 
-#include "extractor/external_memory_node.hpp"
 #include "util/typedefs.hpp"
 
 #include <limits>
@@ -44,7 +43,7 @@ struct FirstAndLastSegmentOfWay
     }
 };
 
-struct FirstAndLastSegmentOfWayStxxlCompare
+struct FirstAndLastSegmentOfWayCompare
 {
     using value_type = FirstAndLastSegmentOfWay;
     bool operator()(const FirstAndLastSegmentOfWay &a, const FirstAndLastSegmentOfWay &b) const

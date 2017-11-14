@@ -29,8 +29,12 @@ namespace guidance
 {
 namespace detail
 {
-std::pair<short, short> getDepartBearings(const LegGeometry &leg_geometry);
-std::pair<short, short> getArriveBearings(const LegGeometry &leg_geometry);
+std::pair<short, short> getDepartBearings(const LegGeometry &leg_geometry,
+                                          const PhantomNode &source_node,
+                                          const bool traversed_in_reverse);
+std::pair<short, short> getArriveBearings(const LegGeometry &leg_geometry,
+                                          const PhantomNode &target_node,
+                                          const bool traversed_in_reverse);
 } // ns detail
 
 inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &facade,
@@ -49,15 +53,20 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
         source_traversed_in_reverse ? source_node.reverse_weight : source_node.forward_weight;
     const EdgeWeight source_duration =
         source_traversed_in_reverse ? source_node.reverse_duration : source_node.forward_duration;
-    const auto source_mode = source_traversed_in_reverse ? source_node.backward_travel_mode
-                                                         : source_node.forward_travel_mode;
+    const auto source_node_id = source_traversed_in_reverse ? source_node.reverse_segment_id.id
+                                                            : source_node.forward_segment_id.id;
+    const auto source_name_id = facade.GetNameIndex(source_node_id);
+    const auto source_mode = facade.GetTravelMode(source_node_id);
+    auto source_classes = facade.GetClasses(facade.GetClassData(source_node_id));
 
     const EdgeWeight target_duration =
         target_traversed_in_reverse ? target_node.reverse_duration : target_node.forward_duration;
     const EdgeWeight target_weight =
         target_traversed_in_reverse ? target_node.reverse_weight : target_node.forward_weight;
-    const auto target_mode = target_traversed_in_reverse ? target_node.backward_travel_mode
-                                                         : target_node.forward_travel_mode;
+    const auto target_node_id = target_traversed_in_reverse ? target_node.reverse_segment_id.id
+                                                            : target_node.forward_segment_id.id;
+    const auto target_name_id = facade.GetNameIndex(target_node_id);
+    const auto target_mode = facade.GetTravelMode(target_node_id);
 
     const auto number_of_segments = leg_geometry.GetNumberOfSegments();
 
@@ -67,7 +76,8 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
     std::size_t segment_index = 0;
     BOOST_ASSERT(leg_geometry.locations.size() >= 2);
 
-    auto bearings = detail::getDepartBearings(leg_geometry);
+    auto bearings =
+        detail::getDepartBearings(leg_geometry, source_node, source_traversed_in_reverse);
 
     StepManeuver maneuver{source_node.location,
                           bearings.first,
@@ -82,7 +92,8 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                                           IntermediateIntersection::NO_INDEX,
                                           0,
                                           util::guidance::LaneTuple(),
-                                          {}};
+                                          {},
+                                          source_classes};
 
     if (leg_data.size() > 0)
     {
@@ -95,7 +106,7 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
 
         // some name changes are not announced in our processing. For these, we have to keep the
         // first name on the segment
-        auto step_name_id = source_node.name_id;
+        auto step_name_id = source_name_id;
         for (std::size_t leg_data_index = 0; leg_data_index < leg_data.size(); ++leg_data_index)
         {
             const auto &path_point = leg_data[leg_data_index];
@@ -110,13 +121,17 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                 const auto ref = facade.GetRefForID(step_name_id);
                 const auto pronunciation = facade.GetPronunciationForID(step_name_id);
                 const auto destinations = facade.GetDestinationsForID(step_name_id);
+                const auto exits = facade.GetExitsForID(step_name_id);
                 const auto distance = leg_geometry.segment_distances[segment_index];
+                // intersections contain the classes of exiting road
+                intersection.classes = facade.GetClasses(path_point.classes);
 
                 steps.push_back(RouteStep{step_name_id,
                                           name.to_string(),
                                           ref.to_string(),
                                           pronunciation.to_string(),
                                           destinations.to_string(),
+                                          exits.to_string(),
                                           NO_ROTARY_NAME,
                                           NO_ROTARY_NAME,
                                           segment_duration / 10.,
@@ -126,7 +141,8 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                                           maneuver,
                                           leg_geometry.FrontIndex(segment_index),
                                           leg_geometry.BackIndex(segment_index) + 1,
-                                          {intersection}});
+                                          {intersection},
+                                          path_point.is_left_hand_driving});
 
                 if (leg_data_index + 1 < leg_data.size())
                 {
@@ -134,15 +150,13 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                 }
                 else
                 {
-                    step_name_id = target_node.name_id;
+                    step_name_id = facade.GetNameIndex(target_node_id);
                 }
 
                 // extract bearings
                 bearings = std::make_pair<std::uint16_t, std::uint16_t>(
                     path_point.pre_turn_bearing.Get(), path_point.post_turn_bearing.Get());
-                const auto entry_class = facade.GetEntryClass(path_point.entry_classid);
-                const auto bearing_class =
-                    facade.GetBearingClass(facade.GetBearingClassID(path_point.turn_via_node));
+                const auto bearing_class = facade.GetBearingClass(path_point.turn_via_node);
                 auto bearing_data = bearing_class.getAvailableBearings();
                 intersection.in = bearing_class.findMatchingBearing(bearings.first);
                 intersection.out = bearing_class.findMatchingBearing(bearings.second);
@@ -170,7 +184,7 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                 intersection.entry.clear();
                 for (auto idx : util::irange<std::size_t>(0, intersection.bearings.size()))
                 {
-                    intersection.entry.push_back(entry_class.allowsEntry(idx));
+                    intersection.entry.push_back(path_point.entry_class.allowsEntry(idx));
                 }
                 std::int16_t bearing_in_driving_direction =
                     util::bearing::reverse(std::round(bearings.first));
@@ -188,12 +202,15 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
         const auto distance = leg_geometry.segment_distances[segment_index];
         const EdgeWeight duration = segment_duration + target_duration;
         const EdgeWeight weight = segment_weight + target_weight;
+        // intersections contain the classes of exiting road
+        intersection.classes = facade.GetClasses(facade.GetClassData(target_node_id));
         BOOST_ASSERT(duration >= 0);
         steps.push_back(RouteStep{step_name_id,
                                   facade.GetNameForID(step_name_id).to_string(),
                                   facade.GetRefForID(step_name_id).to_string(),
                                   facade.GetPronunciationForID(step_name_id).to_string(),
                                   facade.GetDestinationsForID(step_name_id).to_string(),
+                                  facade.GetExitsForID(step_name_id).to_string(),
                                   NO_ROTARY_NAME,
                                   NO_ROTARY_NAME,
                                   duration / 10.,
@@ -203,7 +220,8 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                                   maneuver,
                                   leg_geometry.FrontIndex(segment_index),
                                   leg_geometry.BackIndex(segment_index) + 1,
-                                  {intersection}});
+                                  {intersection},
+                                  facade.IsLeftHandDriving(target_node_id)});
     }
     // In this case the source + target are on the same edge segment
     else
@@ -222,16 +240,20 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
         // u-------------v
         // |   |---------| source_weight
         // |         |---| target_weight
+        BOOST_ASSERT(target_weight >= source_weight);
         const EdgeWeight weight = target_weight - source_weight;
-        const EdgeWeight duration = target_duration - source_duration;
-        BOOST_ASSERT(weight >= 0);
-        BOOST_ASSERT(duration >= 0);
 
-        steps.push_back(RouteStep{source_node.name_id,
-                                  facade.GetNameForID(source_node.name_id).to_string(),
-                                  facade.GetRefForID(source_node.name_id).to_string(),
-                                  facade.GetPronunciationForID(source_node.name_id).to_string(),
-                                  facade.GetDestinationsForID(source_node.name_id).to_string(),
+        // use rectified linear unit function to avoid negative duration values
+        // due to flooring errors in phantom snapping
+        BOOST_ASSERT(target_duration >= source_duration || weight == 0);
+        const EdgeWeight duration = std::max(0, target_duration - source_duration);
+
+        steps.push_back(RouteStep{source_name_id,
+                                  facade.GetNameForID(source_name_id).to_string(),
+                                  facade.GetRefForID(source_name_id).to_string(),
+                                  facade.GetPronunciationForID(source_name_id).to_string(),
+                                  facade.GetDestinationsForID(source_name_id).to_string(),
+                                  facade.GetExitsForID(source_name_id).to_string(),
                                   NO_ROTARY_NAME,
                                   NO_ROTARY_NAME,
                                   duration / 10.,
@@ -241,11 +263,12 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                                   std::move(maneuver),
                                   leg_geometry.FrontIndex(segment_index),
                                   leg_geometry.BackIndex(segment_index) + 1,
-                                  {intersection}});
+                                  {intersection},
+                                  facade.IsLeftHandDriving(source_node_id)});
     }
 
     BOOST_ASSERT(segment_index == number_of_segments - 1);
-    bearings = detail::getArriveBearings(leg_geometry);
+    bearings = detail::getArriveBearings(leg_geometry, target_node, target_traversed_in_reverse);
 
     intersection = {
         target_node.location,
@@ -254,6 +277,7 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
         0,
         IntermediateIntersection::NO_INDEX,
         util::guidance::LaneTuple(),
+        {},
         {}};
 
     // This step has length zero, the only reason we need it is the target location
@@ -265,11 +289,12 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                 0};
 
     BOOST_ASSERT(!leg_geometry.locations.empty());
-    steps.push_back(RouteStep{target_node.name_id,
-                              facade.GetNameForID(target_node.name_id).to_string(),
-                              facade.GetRefForID(target_node.name_id).to_string(),
-                              facade.GetPronunciationForID(target_node.name_id).to_string(),
-                              facade.GetDestinationsForID(target_node.name_id).to_string(),
+    steps.push_back(RouteStep{target_name_id,
+                              facade.GetNameForID(target_name_id).to_string(),
+                              facade.GetRefForID(target_name_id).to_string(),
+                              facade.GetPronunciationForID(target_name_id).to_string(),
+                              facade.GetDestinationsForID(target_name_id).to_string(),
+                              facade.GetExitsForID(target_name_id).to_string(),
                               NO_ROTARY_NAME,
                               NO_ROTARY_NAME,
                               ZERO_DURATION,
@@ -279,7 +304,8 @@ inline std::vector<RouteStep> assembleSteps(const datafacade::BaseDataFacade &fa
                               std::move(maneuver),
                               leg_geometry.locations.size() - 1,
                               leg_geometry.locations.size(),
-                              {intersection}});
+                              {intersection},
+                              facade.IsLeftHandDriving(source_node_id)});
 
     BOOST_ASSERT(steps.front().intersections.size() == 1);
     BOOST_ASSERT(steps.front().intersections.front().bearings.size() == 1);

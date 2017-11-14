@@ -28,8 +28,7 @@ JourneyPlugin::JourneyPlugin(const int max_locations_distance_table)
 {
 }
 
-Status JourneyPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDataFacadeBase &facade,
-                                  const RoutingAlgorithmsInterface &algorithms,
+Status JourneyPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                                   const api::JourneyParameters &params,
                                   util::json::Object &result) const
 {
@@ -65,6 +64,7 @@ Status JourneyPlugin::HandleRequest(const datafacade::ContiguousInternalMemoryDa
         return Error("TooBig", "Too many table coordinates", result);
     }
    
+    const auto &facade = algorithms.GetFacade();
     auto snapped_phantoms = SnapPhantomNodes(GetPhantomNodes(facade, params));
 
     const bool continue_straight_at_waypoint = facade.GetContinueStraightDefault();

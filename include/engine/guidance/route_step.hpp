@@ -42,6 +42,7 @@ struct IntermediateIntersection
     // turn lane information
     util::guidance::LaneTuple lanes;
     extractor::guidance::TurnLaneDescription lane_description;
+    std::vector<std::string> classes;
 };
 
 inline IntermediateIntersection getInvalidIntersection()
@@ -52,6 +53,7 @@ inline IntermediateIntersection getInvalidIntersection()
             IntermediateIntersection::NO_INDEX,
             IntermediateIntersection::NO_INDEX,
             util::guidance::LaneTuple(),
+            {},
             {}};
 }
 
@@ -62,6 +64,7 @@ struct RouteStep
     std::string ref;
     std::string pronunciation;
     std::string destinations;
+    std::string exits;
     std::string rotary_name;
     std::string rotary_pronunciation;
     double duration; // duration in seconds
@@ -73,6 +76,7 @@ struct RouteStep
     std::size_t geometry_begin;
     std::size_t geometry_end;
     std::vector<IntermediateIntersection> intersections;
+    bool is_left_hand_driving;
 
     // remove all information from the route step, marking it as invalid (used to indicate empty
     // steps to be removed).
@@ -114,17 +118,19 @@ inline void RouteStep::Invalidate()
     ref.clear();
     pronunciation.clear();
     destinations.clear();
+    exits.clear();
     rotary_name.clear();
     rotary_pronunciation.clear();
     duration = 0;
     distance = 0;
     weight = 0;
-    mode = TRAVEL_MODE_INACCESSIBLE;
+    mode = extractor::TRAVEL_MODE_INACCESSIBLE;
     maneuver = getInvalidStepManeuver();
     geometry_begin = 0;
     geometry_end = 0;
     intersections.clear();
     intersections.push_back(getInvalidIntersection());
+    is_left_hand_driving = false;
 }
 
 // Elongate by another step in front
@@ -178,6 +184,7 @@ inline RouteStep &RouteStep::AdaptStepSignage(const RouteStep &origin)
     name = origin.name;
     pronunciation = origin.pronunciation;
     destinations = origin.destinations;
+    exits = origin.exits;
     ref = origin.ref;
 
     return *this;

@@ -7,7 +7,7 @@
 
 #include "osrm/coordinate.hpp"
 #include "osrm/engine_config.hpp"
-#include "osrm/json_container.hpp"
+#include "osrm/exception.hpp"
 #include "osrm/json_container.hpp"
 #include "osrm/osrm.hpp"
 #include "osrm/route_parameters.hpp"
@@ -64,17 +64,18 @@ BOOST_AUTO_TEST_CASE(test_route_same_coordinates_fixture)
                                                   {"geometry", "yw_jGupkl@??"},
                                                   {"name", "Boulevard du Larvotto"},
                                                   {"mode", "driving"},
+                                                  {"driving_side", "right"},
                                                   {"maneuver",
                                                    json::Object{{
                                                        {"location", location},
                                                        {"bearing_before", 0},
-                                                       {"bearing_after", 0},
+                                                       {"bearing_after", 58},
                                                        {"type", "depart"},
                                                    }}},
                                                   {"intersections",
                                                    json::Array{{json::Object{
                                                        {{"location", location},
-                                                        {"bearings", json::Array{{0}}},
+                                                        {"bearings", json::Array{{58}}},
                                                         {"entry", json::Array{{json::True()}}},
                                                         {"out", 0}}}}}}}}},
 
@@ -84,15 +85,16 @@ BOOST_AUTO_TEST_CASE(test_route_same_coordinates_fixture)
                                                  {"geometry", "yw_jGupkl@"},
                                                  {"name", "Boulevard du Larvotto"},
                                                  {"mode", "driving"},
+                                                 {"driving_side", "right"},
                                                  {"maneuver",
                                                   json::Object{{{"location", location},
-                                                                {"bearing_before", 0},
+                                                                {"bearing_before", 58},
                                                                 {"bearing_after", 0},
                                                                 {"type", "arrive"}}}},
                                                  {"intersections",
                                                   json::Array{{json::Object{
                                                       {{"location", location},
-                                                       {"bearings", json::Array{{180}}},
+                                                       {"bearings", json::Array{{238}}},
                                                        {"entry", json::Array{{json::True()}}},
                                                        {"in", 0}}}}}}
 

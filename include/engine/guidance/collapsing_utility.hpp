@@ -4,6 +4,7 @@
 #include "extractor/guidance/turn_instruction.hpp"
 #include "engine/guidance/route_step.hpp"
 #include "util/attributes.hpp"
+#include "util/bearing.hpp"
 #include "util/guidance/name_announcements.hpp"
 
 #include <boost/range/algorithm_ext/erase.hpp>
@@ -120,9 +121,15 @@ inline bool haveSameMode(const RouteStep &first, const RouteStep &second, const 
 // alias for readability
 inline bool haveSameName(const RouteStep &lhs, const RouteStep &rhs)
 {
+    const auto has_name_or_ref = [](auto const &step) {
+        return !step.name.empty() || !step.ref.empty();
+    };
+
     // make sure empty is not involved
-    if (lhs.name_id == EMPTY_NAMEID || rhs.name_id == EMPTY_NAMEID)
+    if (!has_name_or_ref(lhs) || !has_name_or_ref(rhs))
+    {
         return false;
+    }
 
     // easy check to not go over the strings if not necessary
     else if (lhs.name_id == rhs.name_id)
@@ -130,8 +137,14 @@ inline bool haveSameName(const RouteStep &lhs, const RouteStep &rhs)
 
     // ok, bite the sour grape and check the strings already
     else
-        return !util::guidance::requiresNameAnnounced(
-            lhs.name, lhs.ref, lhs.pronunciation, rhs.name, rhs.ref, rhs.pronunciation);
+        return !util::guidance::requiresNameAnnounced(lhs.name,
+                                                      lhs.ref,
+                                                      lhs.pronunciation,
+                                                      lhs.exits,
+                                                      rhs.name,
+                                                      rhs.ref,
+                                                      rhs.pronunciation,
+                                                      rhs.exits);
 }
 
 // alias for readability, both turn right | left
@@ -181,6 +194,27 @@ inline std::vector<RouteStep> removeNoTurnInstructions(std::vector<RouteStep> st
     BOOST_ASSERT(steps.back().maneuver.waypoint_type == WaypointType::Arrive);
 
     return steps;
+}
+
+inline double totalTurnAngle(const RouteStep &entry_step, const RouteStep &exit_step)
+{
+    if (entry_step.geometry_begin > exit_step.geometry_begin)
+        return totalTurnAngle(exit_step, entry_step);
+
+    const auto exit_intersection = exit_step.intersections.front();
+    const auto entry_intersection = entry_step.intersections.front();
+    if ((exit_intersection.out >= exit_intersection.bearings.size()) ||
+        (entry_intersection.in >= entry_intersection.bearings.size()))
+        return entry_intersection.bearings[entry_intersection.out];
+
+    const auto exit_step_exit_bearing = exit_intersection.bearings[exit_intersection.out];
+    const auto entry_step_entry_bearing =
+        util::bearing::reverse(entry_intersection.bearings[entry_intersection.in]);
+
+    const double total_angle =
+        util::bearing::angleBetween(entry_step_entry_bearing, exit_step_exit_bearing);
+
+    return total_angle;
 }
 
 } /* namespace guidance */

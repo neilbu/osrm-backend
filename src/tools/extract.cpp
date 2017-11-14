@@ -1,6 +1,6 @@
-#include "extractor/extractor.hpp"
-#include "extractor/extractor_config.hpp"
-#include "extractor/scripting_environment_lua.hpp"
+#include "osrm/exception.hpp"
+#include "osrm/extractor.hpp"
+#include "osrm/extractor_config.hpp"
 #include "util/log.hpp"
 #include "util/version.hpp"
 
@@ -24,11 +24,17 @@ enum class return_code : unsigned
     exit
 };
 
-return_code parseArguments(int argc, char *argv[], extractor::ExtractorConfig &extractor_config)
+return_code parseArguments(int argc,
+                           char *argv[],
+                           std::string &verbosity,
+                           extractor::ExtractorConfig &extractor_config)
 {
-    // declare a group of options that will be allowed only on command line
+    // declare a group of options that will be a llowed only on command line
     boost::program_options::options_description generic_options("Options");
-    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message");
+    generic_options.add_options()("version,v", "Show version")("help,h", "Show this help message")(
+        "verbosity,l",
+        boost::program_options::value<std::string>(&verbosity)->default_value("INFO"),
+        std::string("Log verbosity level: " + util::LogPolicy::GetLevels()).c_str());
 
     // declare a group of options that will be allowed both on command line
     boost::program_options::options_description config_options("Configuration");
@@ -50,7 +56,22 @@ return_code parseArguments(int argc, char *argv[], extractor::ExtractorConfig &e
         boost::program_options::bool_switch(&extractor_config.use_metadata)
             ->implicit_value(true)
             ->default_value(false),
-        "Use metada during osm parsing (This can affect the extraction performance).");
+        "Use metadata during osm parsing (This can affect the extraction performance).")(
+        "parse-conditional-restrictions",
+        boost::program_options::bool_switch(&extractor_config.parse_conditionals)
+            ->implicit_value(true)
+            ->default_value(false),
+        "Save conditional restrictions found during extraction to disk for use "
+        "during contraction")("location-dependent-data",
+                              boost::program_options::value<std::vector<boost::filesystem::path>>(
+                                  &extractor_config.location_dependent_data_paths)
+                                  ->composing(),
+                              "GeoJSON files with location-dependent data")(
+        "disable-location-cache",
+        boost::program_options::bool_switch(&extractor_config.use_locations_cache)
+            ->implicit_value(false)
+            ->default_value(true),
+        "Use internal nodes locations cache for location-dependent data lookups");
 
     bool dummy;
     // hidden options, will be allowed on command line, but will not be
@@ -61,7 +82,7 @@ return_code parseArguments(int argc, char *argv[], extractor::ExtractorConfig &e
         boost::program_options::value<boost::filesystem::path>(&extractor_config.input_path),
         "Input file in .osm, .osm.bz2 or .osm.pbf format")(
         "generate-edge-lookup",
-        boost::program_options::value<bool>(&dummy)->implicit_value(true)->default_value(false),
+        boost::program_options::bool_switch(&dummy)->implicit_value(true)->default_value(false),
         "Not used anymore");
 
     // positional option
@@ -121,8 +142,9 @@ int main(int argc, char *argv[]) try
 {
     util::LogPolicy::GetInstance().Unmute();
     extractor::ExtractorConfig extractor_config;
+    std::string verbosity;
 
-    const auto result = parseArguments(argc, argv, extractor_config);
+    const auto result = parseArguments(argc, argv, verbosity, extractor_config);
 
     if (return_code::fail == result)
     {
@@ -134,7 +156,9 @@ int main(int argc, char *argv[]) try
         return EXIT_SUCCESS;
     }
 
-    extractor_config.UseDefaultOutputNames();
+    util::LogPolicy::GetInstance().SetLevel(verbosity);
+
+    extractor_config.UseDefaultOutputNames(extractor_config.input_path);
 
     if (1 > extractor_config.requested_num_threads)
     {
@@ -156,18 +180,31 @@ int main(int argc, char *argv[]) try
         return EXIT_FAILURE;
     }
 
-    // setup scripting environment
-    extractor::Sol2ScriptingEnvironment scripting_environment(
-        extractor_config.profile_path.string().c_str());
-    auto exitcode = extractor::Extractor(extractor_config).run(scripting_environment);
+    osrm::extract(extractor_config);
 
     util::DumpSTXXLStats();
     util::DumpMemoryStats();
 
-    return exitcode;
+    return EXIT_SUCCESS;
+}
+catch (const osrm::RuntimeError &e)
+{
+    util::DumpSTXXLStats();
+    util::DumpMemoryStats();
+    util::Log(logERROR) << e.what();
+    return e.GetCode();
+}
+catch (const std::system_error &e)
+{
+    util::DumpSTXXLStats();
+    util::DumpMemoryStats();
+    util::Log(logERROR) << e.what();
+    return e.code().value();
 }
 catch (const std::bad_alloc &e)
 {
+    util::DumpSTXXLStats();
+    util::DumpMemoryStats();
     util::Log(logERROR) << "[exception] " << e.what();
     util::Log(logERROR) << "Please provide more memory or consider using a larger swapfile";
     return EXIT_FAILURE;

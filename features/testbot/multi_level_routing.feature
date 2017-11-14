@@ -48,21 +48,63 @@ Feature: Multi level routing
             │   │   │   │
             l───k───p───o
             """
+
+        And the nodes
+            | node | highway         |
+            | i    | traffic_signals |
+            | n    | traffic_signals |
+
         And the ways
             | nodes | highway |
             | abcda | primary |
             | efghe | primary |
             | ijkli | primary |
-            | nmop  | primary |
+            | mnopm | primary |
             | cm    | primary |
             | hj    | primary |
             | kp    | primary |
+        And the partition extra arguments "--small-component-size 1 --max-cell-sizes 4,16"
 
         When I route I should get
-            | from | to | route                                 | time   |
-            | a    | b  | abcda,abcda                           | 20s    |
-            | a    | f  | abcda,cm,nmop,kp,ijkli,hj,efghe,efghe | 257.7s |
-            | c    | m  | cm,cm                                 | 44.7s  |
+            | from | to | route                                  | time   |
+            | a    | b  | abcda,abcda                            | 20s    |
+            | a    | f  | abcda,cm,mnopm,kp,ijkli,hj,efghe,efghe | 229.4s |
+            | a    | l  | abcda,cm,mnopm,kp,ijkli,ijkli          | 144.7s |
+            | a    | o  | abcda,cm,mnopm,mnopm,mnopm             | 124.7s |
+            | f    | l  | efghe,hj,ijkli,ijkli,ijkli             | 124.7s |
+            | f    | o  | efghe,hj,ijkli,kp,mnopm,mnopm          | 144.7s |
+            | l    | o  | ijkli,kp,mnopm,mnopm                   | 60s    |
+            | c    | m  | cm,cm                                  | 44.7s  |
+
+        When I request a travel time matrix I should get
+            |   |     a |     f |     l |     o |
+            | a |     0 | 229.4 | 144.7 | 124.7 |
+            | f | 229.4 |     0 | 124.7 | 144.7 |
+            | l | 144.7 | 124.7 |     0 |    60 |
+            | o | 124.7 | 144.7 |    60 |     0 |
+
+        When I request a travel time matrix I should get
+            |   |     a |     f |     l |     o |
+            | a |     0 | 229.4 | 144.7 | 124.7 |
+
+        When I request a travel time matrix I should get
+            |   |     a |
+            | a |     0 |
+            | f | 229.4 |
+            | l | 144.7 |
+            | o | 124.7 |
+
+        When I request a travel time matrix I should get
+            |   |     a |     f |     l |     o |
+            | a |     0 | 229.4 | 144.7 | 124.7 |
+            | o | 124.7 | 144.7 |    60 |     0 |
+
+        When I request a travel time matrix I should get
+            |   |     a |     o |
+            | a |     0 | 124.7 |
+            | f | 229.4 | 144.7 |
+            | l | 144.7 |    60 |
+            | o | 124.7 |     0 |
 
     Scenario: Testbot - Multi level routing: horizontal road
         Given the node map
@@ -127,3 +169,44 @@ Feature: Multi level routing
         When I route I should get
             | from | to | route                      | time   |
             | a    | k  | abcda,ch,hf,fi,ijkli,ijkli | 724.3s |
+
+
+    Scenario: Testbot - Edge case for matrix plugin with
+        Given the node map
+            """
+            a───b
+            │ ╳ │
+            d───c
+            │   │
+            e   f
+            │ ╱ │
+            h   g───i
+            """
+        And the partition extra arguments "--small-component-size 1 --max-cell-sizes 5,16,64"
+
+        And the nodes
+            | node | highway         |
+            | e    | traffic_signals |
+            | g    | traffic_signals |
+
+        And the ways
+            | nodes | highway | maxspeed |
+            | abcda | primary |          |
+            | ac    | primary |          |
+            | db    | primary |          |
+            | deh   | primary |          |
+            | cfg   | primary |          |
+            | ef    | primary |        1 |
+            | eg    | primary |        1 |
+            | hf    | primary |        1 |
+            | hg    | primary |        1 |
+            | gi    | primary |          |
+
+        When I route I should get
+            | from | to | route               | time |
+            | h    | i  | deh,abcda,cfg,gi,gi | 134s |
+
+        When I request a travel time matrix I should get
+            |   |   h |   i |
+            | h |   0 | 134 |
+            | i | 134 |   0 |

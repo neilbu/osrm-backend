@@ -6,13 +6,17 @@
 #include "engine/datafacade/datafacade_base.hpp"
 
 #include "engine/algorithm.hpp"
+#include "engine/approach.hpp"
 #include "engine/geospatial_query.hpp"
 
 #include "customizer/edge_based_graph.hpp"
 
 #include "extractor/datasources.hpp"
+#include "extractor/edge_based_node.hpp"
 #include "extractor/guidance/turn_instruction.hpp"
 #include "extractor/guidance/turn_lane_types.hpp"
+#include "extractor/intersection_bearings_container.hpp"
+#include "extractor/node_data_container.hpp"
 #include "extractor/packed_osm_ids.hpp"
 #include "extractor/profile_properties.hpp"
 #include "extractor/segment_data_container.hpp"
@@ -28,6 +32,7 @@
 
 #include "util/exception.hpp"
 #include "util/exception_utils.hpp"
+#include "util/filtered_graph.hpp"
 #include "util/guidance/bearing_class.hpp"
 #include "util/guidance/entry_class.hpp"
 #include "util/guidance/turn_bearing.hpp"
@@ -65,7 +70,7 @@ template <>
 class ContiguousInternalMemoryAlgorithmDataFacade<CH> : public datafacade::AlgorithmDataFacade<CH>
 {
   private:
-    using QueryGraph = contractor::QueryGraphView;
+    using QueryGraph = util::FilteredGraphView<contractor::QueryGraphView>;
     using GraphNode = QueryGraph::NodeArrayEntry;
     using GraphEdge = QueryGraph::EdgeArrayEntry;
 
@@ -74,7 +79,9 @@ class ContiguousInternalMemoryAlgorithmDataFacade<CH> : public datafacade::Algor
     // allocator that keeps the allocation data
     std::shared_ptr<ContiguousBlockAllocator> allocator;
 
-    void InitializeGraphPointer(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeGraphPointer(storage::DataLayout &data_layout,
+                                char *memory_block,
+                                const std::size_t exclude_index)
     {
         auto graph_nodes_ptr = data_layout.GetBlockPtr<GraphNode>(
             memory_block, storage::DataLayout::CH_GRAPH_NODE_LIST);
@@ -82,24 +89,34 @@ class ContiguousInternalMemoryAlgorithmDataFacade<CH> : public datafacade::Algor
         auto graph_edges_ptr = data_layout.GetBlockPtr<GraphEdge>(
             memory_block, storage::DataLayout::CH_GRAPH_EDGE_LIST);
 
+        auto filter_block_id = static_cast<storage::DataLayout::BlockID>(
+            storage::DataLayout::CH_EDGE_FILTER_0 + exclude_index);
+
+        auto edge_filter_ptr = data_layout.GetBlockPtr<unsigned>(memory_block, filter_block_id);
+
         util::vector_view<GraphNode> node_list(
             graph_nodes_ptr, data_layout.num_entries[storage::DataLayout::CH_GRAPH_NODE_LIST]);
         util::vector_view<GraphEdge> edge_list(
             graph_edges_ptr, data_layout.num_entries[storage::DataLayout::CH_GRAPH_EDGE_LIST]);
-        m_query_graph = QueryGraph(node_list, edge_list);
+
+        util::vector_view<bool> edge_filter(edge_filter_ptr,
+                                            data_layout.num_entries[filter_block_id]);
+        m_query_graph = QueryGraph({node_list, edge_list}, edge_filter);
     }
 
   public:
     ContiguousInternalMemoryAlgorithmDataFacade(
-        std::shared_ptr<ContiguousBlockAllocator> allocator_)
+        std::shared_ptr<ContiguousBlockAllocator> allocator_, std::size_t exclude_index)
         : allocator(std::move(allocator_))
     {
-        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory());
+        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory(), exclude_index);
     }
 
-    void InitializeInternalPointers(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeInternalPointers(storage::DataLayout &data_layout,
+                                    char *memory_block,
+                                    const std::size_t exclude_index)
     {
-        InitializeGraphPointer(data_layout, memory_block);
+        InitializeGraphPointer(data_layout, memory_block, exclude_index);
     }
 
     // search graph access
@@ -118,10 +135,6 @@ class ContiguousInternalMemoryAlgorithmDataFacade<CH> : public datafacade::Algor
     {
         return m_query_graph.GetEdgeData(e);
     }
-
-    EdgeID BeginEdges(const NodeID n) const override final { return m_query_graph.BeginEdges(n); }
-
-    EdgeID EndEdges(const NodeID n) const override final { return m_query_graph.EndEdges(n); }
 
     EdgeRange GetAdjacentEdgeRange(const NodeID node) const override final
     {
@@ -153,45 +166,6 @@ class ContiguousInternalMemoryAlgorithmDataFacade<CH> : public datafacade::Algor
     }
 };
 
-template <>
-class ContiguousInternalMemoryAlgorithmDataFacade<CoreCH>
-    : public datafacade::AlgorithmDataFacade<CoreCH>
-{
-  private:
-    util::vector_view<bool> m_is_core_node;
-
-    // allocator that keeps the allocation data
-    std::shared_ptr<ContiguousBlockAllocator> allocator;
-
-    void InitializeCoreInformationPointer(storage::DataLayout &data_layout, char *memory_block)
-    {
-        auto core_marker_ptr =
-            data_layout.GetBlockPtr<unsigned>(memory_block, storage::DataLayout::CH_CORE_MARKER);
-        util::vector_view<bool> is_core_node(
-            core_marker_ptr, data_layout.num_entries[storage::DataLayout::CH_CORE_MARKER]);
-        m_is_core_node = std::move(is_core_node);
-    }
-
-  public:
-    ContiguousInternalMemoryAlgorithmDataFacade(
-        std::shared_ptr<ContiguousBlockAllocator> allocator_)
-        : allocator(std::move(allocator_))
-    {
-        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory());
-    }
-
-    void InitializeInternalPointers(storage::DataLayout &data_layout, char *memory_block)
-    {
-        InitializeCoreInformationPointer(data_layout, memory_block);
-    }
-
-    bool IsCoreNode(const NodeID id) const override final
-    {
-        BOOST_ASSERT(id < m_is_core_node.size());
-        return m_is_core_node[id];
-    }
-};
-
 /**
  * This base class implements the Datafacade interface for accessing
  * data that's stored in a single large block of memory (RAM).
@@ -209,6 +183,7 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
     using SharedGeospatialQuery = GeospatialQuery<SharedRTree, BaseDataFacade>;
     using RTreeNode = SharedRTree::TreeNode;
 
+    extractor::ClassData exclude_mask;
     std::string m_timestamp;
     extractor::ProfileProperties *m_profile_properties;
     extractor::Datasources *m_datasources;
@@ -216,13 +191,13 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
     unsigned m_check_sum;
     util::vector_view<util::Coordinate> m_coordinate_list;
     extractor::PackedOSMIDsView m_osmnodeid_list;
-    util::NameTable m_names_table;
     util::vector_view<std::uint32_t> m_lane_description_offsets;
     util::vector_view<extractor::guidance::TurnLaneType::Mask> m_lane_description_masks;
     util::vector_view<TurnPenalty> m_turn_weight_penalties;
     util::vector_view<TurnPenalty> m_turn_duration_penalties;
     extractor::SegmentDataView segment_data;
     extractor::TurnDataView turn_data;
+    extractor::EdgeBasedNodeDataView edge_based_node_data;
 
     util::vector_view<char> m_datasource_name_data;
     util::vector_view<std::size_t> m_datasource_name_offsets;
@@ -233,27 +208,24 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
     std::unique_ptr<SharedGeospatialQuery> m_geospatial_query;
     boost::filesystem::path file_index_path;
 
-    util::NameTable m_name_table;
-    // bearing classes by node based node
-    util::vector_view<BearingClassID> m_bearing_class_id_table;
-    // entry class IDs
-    util::vector_view<EntryClassID> m_entry_class_id_list;
+    extractor::IntersectionBearingsView intersection_bearings_view;
 
+    util::NameTable m_name_table;
     // the look-up table for entry classes. An entry class lists the possibility of entry for all
     // available turns. Such a class id is stored with every edge.
     util::vector_view<util::guidance::EntryClass> m_entry_class_table;
-    // the look-up table for distinct bearing classes. A bearing class lists the available bearings
-    // at an intersection
-    std::shared_ptr<util::RangeTable<16, storage::Ownership::View>> m_bearing_ranges_table;
-    util::vector_view<DiscreteBearing> m_bearing_values_table;
 
     // allocator that keeps the allocation data
     std::shared_ptr<ContiguousBlockAllocator> allocator;
 
-    void InitializeProfilePropertiesPointer(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeProfilePropertiesPointer(storage::DataLayout &data_layout,
+                                            char *memory_block,
+                                            const std::size_t exclude_index)
     {
         m_profile_properties = data_layout.GetBlockPtr<extractor::ProfileProperties>(
             memory_block, storage::DataLayout::PROPERTIES);
+
+        exclude_mask = m_profile_properties->excludable_classes[exclude_index];
     }
 
     void InitializeTimestampPointer(storage::DataLayout &data_layout, char *memory_block)
@@ -287,50 +259,60 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
                                   "Is any data loaded into shared memory?" + SOURCE_REF);
         }
 
-        auto tree_ptr =
+        auto tree_nodes_ptr =
             data_layout.GetBlockPtr<RTreeNode>(memory_block, storage::DataLayout::R_SEARCH_TREE);
+        auto tree_level_sizes_ptr = data_layout.GetBlockPtr<std::uint64_t>(
+            memory_block, storage::DataLayout::R_SEARCH_TREE_LEVELS);
         m_static_rtree.reset(
-            new SharedRTree(tree_ptr,
+            new SharedRTree(tree_nodes_ptr,
                             data_layout.num_entries[storage::DataLayout::R_SEARCH_TREE],
+                            tree_level_sizes_ptr,
+                            data_layout.num_entries[storage::DataLayout::R_SEARCH_TREE_LEVELS],
                             file_index_path,
                             m_coordinate_list));
         m_geospatial_query.reset(
             new SharedGeospatialQuery(*m_static_rtree, m_coordinate_list, *this));
     }
 
-    void InitializeNodeInformationPointers(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeNodeInformationPointers(storage::DataLayout &layout, char *memory_ptr)
     {
-        const auto coordinate_list_ptr = data_layout.GetBlockPtr<util::Coordinate>(
-            memory_block, storage::DataLayout::COORDINATE_LIST);
+        const auto coordinate_list_ptr =
+            layout.GetBlockPtr<util::Coordinate>(memory_ptr, storage::DataLayout::COORDINATE_LIST);
         m_coordinate_list.reset(coordinate_list_ptr,
-                                data_layout.num_entries[storage::DataLayout::COORDINATE_LIST]);
+                                layout.num_entries[storage::DataLayout::COORDINATE_LIST]);
 
-        for (unsigned i = 0; i < m_coordinate_list.size(); ++i)
-        {
-            BOOST_ASSERT(GetCoordinateOfNode(i).IsValid());
-        }
+        const auto osmnodeid_ptr = layout.GetBlockPtr<extractor::PackedOSMIDsView::block_type>(
+            memory_ptr, storage::DataLayout::OSM_NODE_ID_LIST);
+        m_osmnodeid_list = extractor::PackedOSMIDsView(
+            util::vector_view<extractor::PackedOSMIDsView::block_type>(
+                osmnodeid_ptr, layout.num_entries[storage::DataLayout::OSM_NODE_ID_LIST]),
+            // We (ab)use the number of coordinates here because we know we have the same amount of
+            // ids
+            layout.num_entries[storage::DataLayout::COORDINATE_LIST]);
+    }
 
-        const auto osmnodeid_list_ptr = data_layout.GetBlockPtr<std::uint64_t>(
-            memory_block, storage::DataLayout::OSM_NODE_ID_LIST);
-        m_osmnodeid_list.reset(osmnodeid_list_ptr,
-                               data_layout.num_entries[storage::DataLayout::OSM_NODE_ID_LIST]);
-        // We (ab)use the number of coordinates here because we know we have the same amount of ids
-        m_osmnodeid_list.set_number_of_entries(
-            data_layout.num_entries[storage::DataLayout::COORDINATE_LIST]);
+    void InitializeEdgeBasedNodeDataInformationPointers(storage::DataLayout &layout,
+                                                        char *memory_ptr)
+    {
+        const auto edge_based_node_list_ptr = layout.GetBlockPtr<extractor::EdgeBasedNode>(
+            memory_ptr, storage::DataLayout::EDGE_BASED_NODE_DATA_LIST);
+        util::vector_view<extractor::EdgeBasedNode> edge_based_node_data_list(
+            edge_based_node_list_ptr,
+            layout.num_entries[storage::DataLayout::EDGE_BASED_NODE_DATA_LIST]);
+
+        const auto annotation_data_list_ptr =
+            layout.GetBlockPtr<extractor::NodeBasedEdgeAnnotation>(
+                memory_ptr, storage::DataLayout::ANNOTATION_DATA_LIST);
+        util::vector_view<extractor::NodeBasedEdgeAnnotation> annotation_data(
+            annotation_data_list_ptr,
+            layout.num_entries[storage::DataLayout::ANNOTATION_DATA_LIST]);
+
+        edge_based_node_data = extractor::EdgeBasedNodeDataView(
+            std::move(edge_based_node_data_list), std::move(annotation_data));
     }
 
     void InitializeEdgeInformationPointers(storage::DataLayout &layout, char *memory_ptr)
     {
-        auto via_geometry_list_ptr =
-            layout.GetBlockPtr<GeometryID>(memory_ptr, storage::DataLayout::VIA_NODE_LIST);
-        util::vector_view<GeometryID> geometry_ids(
-            via_geometry_list_ptr, layout.num_entries[storage::DataLayout::VIA_NODE_LIST]);
-
-        const auto travel_mode_list_ptr =
-            layout.GetBlockPtr<extractor::TravelMode>(memory_ptr, storage::DataLayout::TRAVEL_MODE);
-        util::vector_view<extractor::TravelMode> travel_modes(
-            travel_mode_list_ptr, layout.num_entries[storage::DataLayout::TRAVEL_MODE]);
-
         const auto lane_data_id_ptr =
             layout.GetBlockPtr<LaneDataID>(memory_ptr, storage::DataLayout::LANE_DATA_ID);
         util::vector_view<LaneDataID> lane_data_ids(
@@ -341,11 +323,6 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
                 memory_ptr, storage::DataLayout::TURN_INSTRUCTION);
         util::vector_view<extractor::guidance::TurnInstruction> turn_instructions(
             turn_instruction_list_ptr, layout.num_entries[storage::DataLayout::TURN_INSTRUCTION]);
-
-        const auto name_id_list_ptr =
-            layout.GetBlockPtr<NameID>(memory_ptr, storage::DataLayout::NAME_ID_LIST);
-        util::vector_view<NameID> name_ids(name_id_list_ptr,
-                                           layout.num_entries[storage::DataLayout::NAME_ID_LIST]);
 
         const auto entry_class_id_list_ptr =
             layout.GetBlockPtr<EntryClassID>(memory_ptr, storage::DataLayout::ENTRY_CLASSID);
@@ -362,11 +339,8 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         util::vector_view<util::guidance::TurnBearing> post_turn_bearings(
             post_turn_bearing_ptr, layout.num_entries[storage::DataLayout::POST_TURN_BEARING]);
 
-        turn_data = extractor::TurnDataView(std::move(geometry_ids),
-                                            std::move(name_ids),
-                                            std::move(turn_instructions),
+        turn_data = extractor::TurnDataView(std::move(turn_instructions),
                                             std::move(lane_data_ids),
-                                            std::move(travel_modes),
                                             std::move(entry_class_ids),
                                             std::move(pre_turn_bearings),
                                             std::move(post_turn_bearings));
@@ -425,40 +399,58 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         util::vector_view<unsigned> geometry_begin_indices(
             geometries_index_ptr, data_layout.num_entries[storage::DataLayout::GEOMETRIES_INDEX]);
 
+        auto num_entries = data_layout.num_entries[storage::DataLayout::GEOMETRIES_NODE_LIST];
         auto geometries_node_list_ptr = data_layout.GetBlockPtr<NodeID>(
             memory_block, storage::DataLayout::GEOMETRIES_NODE_LIST);
-        util::vector_view<NodeID> geometry_node_list(
-            geometries_node_list_ptr,
-            data_layout.num_entries[storage::DataLayout::GEOMETRIES_NODE_LIST]);
+        util::vector_view<NodeID> geometry_node_list(geometries_node_list_ptr, num_entries);
 
-        auto geometries_fwd_weight_list_ptr = data_layout.GetBlockPtr<SegmentWeight>(
-            memory_block, storage::DataLayout::GEOMETRIES_FWD_WEIGHT_LIST);
-        util::vector_view<SegmentWeight> geometry_fwd_weight_list(
-            geometries_fwd_weight_list_ptr,
-            data_layout.num_entries[storage::DataLayout::GEOMETRIES_FWD_WEIGHT_LIST]);
+        auto geometries_fwd_weight_list_ptr =
+            data_layout.GetBlockPtr<extractor::SegmentDataView::SegmentWeightVector::block_type>(
+                memory_block, storage::DataLayout::GEOMETRIES_FWD_WEIGHT_LIST);
+        extractor::SegmentDataView::SegmentWeightVector geometry_fwd_weight_list(
+            util::vector_view<extractor::SegmentDataView::SegmentWeightVector::block_type>(
+                geometries_fwd_weight_list_ptr,
+                data_layout.num_entries[storage::DataLayout::GEOMETRIES_FWD_WEIGHT_LIST]),
+            num_entries);
 
-        auto geometries_rev_weight_list_ptr = data_layout.GetBlockPtr<SegmentWeight>(
-            memory_block, storage::DataLayout::GEOMETRIES_REV_WEIGHT_LIST);
-        util::vector_view<SegmentWeight> geometry_rev_weight_list(
-            geometries_rev_weight_list_ptr,
-            data_layout.num_entries[storage::DataLayout::GEOMETRIES_REV_WEIGHT_LIST]);
+        auto geometries_rev_weight_list_ptr =
+            data_layout.GetBlockPtr<extractor::SegmentDataView::SegmentWeightVector::block_type>(
+                memory_block, storage::DataLayout::GEOMETRIES_REV_WEIGHT_LIST);
+        extractor::SegmentDataView::SegmentWeightVector geometry_rev_weight_list(
+            util::vector_view<extractor::SegmentDataView::SegmentWeightVector::block_type>(
+                geometries_rev_weight_list_ptr,
+                data_layout.num_entries[storage::DataLayout::GEOMETRIES_REV_WEIGHT_LIST]),
+            num_entries);
 
-        auto geometries_fwd_duration_list_ptr = data_layout.GetBlockPtr<SegmentDuration>(
-            memory_block, storage::DataLayout::GEOMETRIES_FWD_DURATION_LIST);
-        util::vector_view<SegmentDuration> geometry_fwd_duration_list(
-            geometries_fwd_duration_list_ptr,
-            data_layout.num_entries[storage::DataLayout::GEOMETRIES_FWD_DURATION_LIST]);
+        auto geometries_fwd_duration_list_ptr =
+            data_layout.GetBlockPtr<extractor::SegmentDataView::SegmentDurationVector::block_type>(
+                memory_block, storage::DataLayout::GEOMETRIES_FWD_DURATION_LIST);
+        extractor::SegmentDataView::SegmentDurationVector geometry_fwd_duration_list(
+            util::vector_view<extractor::SegmentDataView::SegmentDurationVector::block_type>(
+                geometries_fwd_duration_list_ptr,
+                data_layout.num_entries[storage::DataLayout::GEOMETRIES_FWD_DURATION_LIST]),
+            num_entries);
 
-        auto geometries_rev_duration_list_ptr = data_layout.GetBlockPtr<SegmentDuration>(
-            memory_block, storage::DataLayout::GEOMETRIES_REV_DURATION_LIST);
-        util::vector_view<SegmentDuration> geometry_rev_duration_list(
-            geometries_rev_duration_list_ptr,
-            data_layout.num_entries[storage::DataLayout::GEOMETRIES_REV_DURATION_LIST]);
+        auto geometries_rev_duration_list_ptr =
+            data_layout.GetBlockPtr<extractor::SegmentDataView::SegmentDurationVector::block_type>(
+                memory_block, storage::DataLayout::GEOMETRIES_REV_DURATION_LIST);
+        extractor::SegmentDataView::SegmentDurationVector geometry_rev_duration_list(
+            util::vector_view<extractor::SegmentDataView::SegmentDurationVector::block_type>(
+                geometries_rev_duration_list_ptr,
+                data_layout.num_entries[storage::DataLayout::GEOMETRIES_REV_DURATION_LIST]),
+            num_entries);
 
-        auto datasources_list_ptr = data_layout.GetBlockPtr<DatasourceID>(
-            memory_block, storage::DataLayout::DATASOURCES_LIST);
-        util::vector_view<DatasourceID> datasources_list(
-            datasources_list_ptr, data_layout.num_entries[storage::DataLayout::DATASOURCES_LIST]);
+        auto geometries_fwd_datasources_list_ptr = data_layout.GetBlockPtr<DatasourceID>(
+            memory_block, storage::DataLayout::GEOMETRIES_FWD_DATASOURCES_LIST);
+        util::vector_view<DatasourceID> geometry_fwd_datasources_list(
+            geometries_fwd_datasources_list_ptr,
+            data_layout.num_entries[storage::DataLayout::GEOMETRIES_FWD_DATASOURCES_LIST]);
+
+        auto geometries_rev_datasources_list_ptr = data_layout.GetBlockPtr<DatasourceID>(
+            memory_block, storage::DataLayout::GEOMETRIES_REV_DATASOURCES_LIST);
+        util::vector_view<DatasourceID> geometry_rev_datasources_list(
+            geometries_rev_datasources_list_ptr,
+            data_layout.num_entries[storage::DataLayout::GEOMETRIES_REV_DATASOURCES_LIST]);
 
         segment_data = extractor::SegmentDataView{std::move(geometry_begin_indices),
                                                   std::move(geometry_node_list),
@@ -466,7 +458,8 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
                                                   std::move(geometry_rev_weight_list),
                                                   std::move(geometry_fwd_duration_list),
                                                   std::move(geometry_rev_duration_list),
-                                                  std::move(datasources_list)};
+                                                  std::move(geometry_fwd_datasources_list),
+                                                  std::move(geometry_rev_datasources_list)};
 
         m_datasources = data_layout.GetBlockPtr<extractor::Datasources>(
             memory_block, storage::DataLayout::DATASOURCES_NAMES);
@@ -476,15 +469,13 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
     {
         auto bearing_class_id_ptr = data_layout.GetBlockPtr<BearingClassID>(
             memory_block, storage::DataLayout::BEARING_CLASSID);
-        typename util::vector_view<BearingClassID> bearing_class_id_table(
+        util::vector_view<BearingClassID> bearing_class_id(
             bearing_class_id_ptr, data_layout.num_entries[storage::DataLayout::BEARING_CLASSID]);
-        m_bearing_class_id_table = std::move(bearing_class_id_table);
 
-        auto bearing_class_ptr = data_layout.GetBlockPtr<DiscreteBearing>(
+        auto bearing_values_ptr = data_layout.GetBlockPtr<DiscreteBearing>(
             memory_block, storage::DataLayout::BEARING_VALUES);
-        typename util::vector_view<DiscreteBearing> bearing_class_table(
-            bearing_class_ptr, data_layout.num_entries[storage::DataLayout::BEARING_VALUES]);
-        m_bearing_values_table = std::move(bearing_class_table);
+        util::vector_view<DiscreteBearing> bearing_values(
+            bearing_values_ptr, data_layout.num_entries[storage::DataLayout::BEARING_VALUES]);
 
         auto offsets_ptr =
             data_layout.GetBlockPtr<unsigned>(memory_block, storage::DataLayout::BEARING_OFFSETS);
@@ -495,27 +486,33 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         util::vector_view<IndexBlock> bearing_blocks(
             blocks_ptr, data_layout.num_entries[storage::DataLayout::BEARING_BLOCKS]);
 
-        m_bearing_ranges_table = std::make_unique<util::RangeTable<16, storage::Ownership::View>>(
-            bearing_offsets, bearing_blocks, static_cast<unsigned>(m_bearing_values_table.size()));
+        util::RangeTable<16, storage::Ownership::View> bearing_range_table(
+            bearing_offsets, bearing_blocks, static_cast<unsigned>(bearing_values.size()));
+
+        intersection_bearings_view = extractor::IntersectionBearingsView{
+            std::move(bearing_values), std::move(bearing_class_id), std::move(bearing_range_table)};
 
         auto entry_class_ptr = data_layout.GetBlockPtr<util::guidance::EntryClass>(
             memory_block, storage::DataLayout::ENTRY_CLASS);
-        typename util::vector_view<util::guidance::EntryClass> entry_class_table(
+        util::vector_view<util::guidance::EntryClass> entry_class_table(
             entry_class_ptr, data_layout.num_entries[storage::DataLayout::ENTRY_CLASS]);
         m_entry_class_table = std::move(entry_class_table);
     }
 
-    void InitializeInternalPointers(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeInternalPointers(storage::DataLayout &data_layout,
+                                    char *memory_block,
+                                    const std::size_t exclude_index)
     {
         InitializeChecksumPointer(data_layout, memory_block);
         InitializeNodeInformationPointers(data_layout, memory_block);
+        InitializeEdgeBasedNodeDataInformationPointers(data_layout, memory_block);
         InitializeEdgeInformationPointers(data_layout, memory_block);
         InitializeTurnPenalties(data_layout, memory_block);
         InitializeGeometryPointers(data_layout, memory_block);
         InitializeTimestampPointer(data_layout, memory_block);
         InitializeNamePointers(data_layout, memory_block);
         InitializeTurnLaneDescriptionsPointers(data_layout, memory_block);
-        InitializeProfilePropertiesPointer(data_layout, memory_block);
+        InitializeProfilePropertiesPointer(data_layout, memory_block, exclude_index);
         InitializeRTreePointers(data_layout, memory_block);
         InitializeIntersectionClassPointers(data_layout, memory_block);
     }
@@ -523,10 +520,11 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
   public:
     // allows switching between process_memory/shared_memory datafacade, based on the type of
     // allocator
-    ContiguousInternalMemoryDataFacadeBase(std::shared_ptr<ContiguousBlockAllocator> allocator_)
+    ContiguousInternalMemoryDataFacadeBase(std::shared_ptr<ContiguousBlockAllocator> allocator_,
+                                           const std::size_t exclude_index)
         : allocator(std::move(allocator_))
     {
-        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory());
+        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory(), exclude_index);
     }
 
     // node and edge information access
@@ -537,10 +535,10 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
 
     OSMNodeID GetOSMNodeIDOfNode(const NodeID id) const override final
     {
-        return m_osmnodeid_list.at(id);
+        return m_osmnodeid_list[id];
     }
 
-    virtual std::vector<NodeID> GetUncompressedForwardGeometry(const EdgeID id) const override final
+    std::vector<NodeID> GetUncompressedForwardGeometry(const EdgeID id) const override final
     {
 
         auto range = segment_data.GetForwardGeometry(id);
@@ -599,11 +597,6 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         return std::vector<DatasourceID>{range.begin(), range.end()};
     }
 
-    virtual GeometryID GetGeometryIndexForEdgeID(const EdgeID id) const override final
-    {
-        return turn_data.GetGeometryID(id);
-    }
-
     virtual TurnPenalty GetWeightPenaltyForEdgeID(const unsigned id) const override final
     {
         BOOST_ASSERT(m_turn_weight_penalties.size() > id);
@@ -622,11 +615,6 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         return turn_data.GetTurnInstruction(id);
     }
 
-    extractor::TravelMode GetTravelModeForEdgeID(const EdgeID id) const override final
-    {
-        return turn_data.GetTravelMode(id);
-    }
-
     std::vector<RTreeLeaf> GetEdgesInBox(const util::Coordinate south_west,
                                          const util::Coordinate north_east) const override final
     {
@@ -638,54 +626,61 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
 
     std::vector<PhantomNodeWithDistance>
     NearestPhantomNodesInRange(const util::Coordinate input_coordinate,
-                               const float max_distance) const override final
+                               const float max_distance,
+                               const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
-        return m_geospatial_query->NearestPhantomNodesInRange(input_coordinate, max_distance);
+        return m_geospatial_query->NearestPhantomNodesInRange(
+            input_coordinate, max_distance, approach);
     }
 
     std::vector<PhantomNodeWithDistance>
     NearestPhantomNodesInRange(const util::Coordinate input_coordinate,
                                const float max_distance,
                                const int bearing,
-                               const int bearing_range) const override final
+                               const int bearing_range,
+                               const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodesInRange(
-            input_coordinate, max_distance, bearing, bearing_range);
-    }
-
-    std::vector<PhantomNodeWithDistance>
-    NearestPhantomNodes(const util::Coordinate input_coordinate,
-                        const unsigned max_results) const override final
-    {
-        BOOST_ASSERT(m_geospatial_query.get());
-
-        return m_geospatial_query->NearestPhantomNodes(input_coordinate, max_results);
+            input_coordinate, max_distance, bearing, bearing_range, approach);
     }
 
     std::vector<PhantomNodeWithDistance>
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
-                        const double max_distance) const override final
+                        const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
-        return m_geospatial_query->NearestPhantomNodes(input_coordinate, max_results, max_distance);
+        return m_geospatial_query->NearestPhantomNodes(input_coordinate, max_results, approach);
+    }
+
+    std::vector<PhantomNodeWithDistance>
+    NearestPhantomNodes(const util::Coordinate input_coordinate,
+                        const unsigned max_results,
+                        const double max_distance,
+                        const Approach approach) const override final
+    {
+        BOOST_ASSERT(m_geospatial_query.get());
+
+        return m_geospatial_query->NearestPhantomNodes(
+            input_coordinate, max_results, max_distance, approach);
     }
 
     std::vector<PhantomNodeWithDistance>
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
                         const int bearing,
-                        const int bearing_range) const override final
+                        const int bearing_range,
+                        const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodes(
-            input_coordinate, max_results, bearing, bearing_range);
+            input_coordinate, max_results, bearing, bearing_range, approach);
     }
 
     std::vector<PhantomNodeWithDistance>
@@ -693,60 +688,102 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
                         const unsigned max_results,
                         const double max_distance,
                         const int bearing,
-                        const int bearing_range) const override final
+                        const int bearing_range,
+                        const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodes(
-            input_coordinate, max_results, max_distance, bearing, bearing_range);
+            input_coordinate, max_results, max_distance, bearing, bearing_range, approach);
     }
 
-    std::pair<PhantomNode, PhantomNode> NearestPhantomNodeWithAlternativeFromBigComponent(
-        const util::Coordinate input_coordinate) const override final
+    std::pair<PhantomNode, PhantomNode>
+    NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
+                                                      const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate);
+            input_coordinate, approach);
     }
 
-    std::pair<PhantomNode, PhantomNode> NearestPhantomNodeWithAlternativeFromBigComponent(
-        const util::Coordinate input_coordinate, const double max_distance) const override final
+    std::pair<PhantomNode, PhantomNode>
+    NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
+                                                      const double max_distance,
+                                                      const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate, max_distance);
+            input_coordinate, max_distance, approach);
     }
 
     std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const double max_distance,
                                                       const int bearing,
-                                                      const int bearing_range) const override final
+                                                      const int bearing_range,
+                                                      const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate, max_distance, bearing, bearing_range);
+            input_coordinate, max_distance, bearing, bearing_range, approach);
     }
 
     std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const int bearing,
-                                                      const int bearing_range) const override final
+                                                      const int bearing_range,
+                                                      const Approach approach) const override final
     {
         BOOST_ASSERT(m_geospatial_query.get());
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate, bearing, bearing_range);
+            input_coordinate, bearing, bearing_range, approach);
     }
 
     unsigned GetCheckSum() const override final { return m_check_sum; }
 
-    NameID GetNameIndexFromEdgeID(const EdgeID id) const override final
+    GeometryID GetGeometryIndex(const NodeID id) const override final
     {
-        return turn_data.GetNameID(id);
+        return edge_based_node_data.GetGeometryID(id);
+    }
+
+    ComponentID GetComponentID(const NodeID id) const override final
+    {
+        return edge_based_node_data.GetComponentID(id);
+    }
+
+    extractor::TravelMode GetTravelMode(const NodeID id) const override final
+    {
+        return edge_based_node_data.GetTravelMode(id);
+    }
+
+    extractor::ClassData GetClassData(const NodeID id) const override final
+    {
+        return edge_based_node_data.GetClassData(id);
+    }
+
+    bool ExcludeNode(const NodeID id) const override final
+    {
+        return (edge_based_node_data.GetClassData(id) & exclude_mask) > 0;
+    }
+
+    std::vector<std::string> GetClasses(const extractor::ClassData class_data) const override final
+    {
+        auto indexes = extractor::getClassIndexes(class_data);
+        std::vector<std::string> classes(indexes.size());
+        std::transform(indexes.begin(), indexes.end(), classes.begin(), [this](const auto index) {
+            return m_profile_properties->GetClassName(index);
+        });
+
+        return classes;
+    }
+
+    NameID GetNameIndex(const NodeID id) const override final
+    {
+        return edge_based_node_data.GetNameID(id);
     }
 
     StringView GetNameForID(const NameID id) const override final
@@ -767,6 +804,11 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
     StringView GetDestinationsForID(const NameID id) const override final
     {
         return m_name_table.GetDestinationsForID(id);
+    }
+
+    StringView GetExitsForID(const NameID id) const override final
+    {
+        return m_name_table.GetExitsForID(id);
     }
 
     StringView GetDatasourceName(const DatasourceID id) const override final
@@ -798,27 +840,9 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         return m_profile_properties->GetWeightMultiplier();
     }
 
-    BearingClassID GetBearingClassID(const NodeID id) const override final
+    util::guidance::BearingClass GetBearingClass(const NodeID node) const override final
     {
-        return m_bearing_class_id_table.at(id);
-    }
-
-    util::guidance::BearingClass
-    GetBearingClass(const BearingClassID bearing_class_id) const override final
-    {
-        BOOST_ASSERT(bearing_class_id != INVALID_BEARING_CLASSID);
-        auto range = m_bearing_ranges_table->GetRange(bearing_class_id);
-        util::guidance::BearingClass result;
-        for (auto itr = m_bearing_values_table.begin() + range.front();
-             itr != m_bearing_values_table.begin() + range.back() + 1;
-             ++itr)
-            result.add(*itr);
-        return result;
-    }
-
-    EntryClassID GetEntryClassID(const EdgeID eid) const override final
-    {
-        return turn_data.GetEntryClassID(eid);
+        return intersection_bearings_view.GetBearingClass(node);
     }
 
     util::guidance::TurnBearing PreTurnBearing(const EdgeID eid) const override final
@@ -830,8 +854,9 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
         return turn_data.GetPostTurnBearing(eid);
     }
 
-    util::guidance::EntryClass GetEntryClass(const EntryClassID entry_class_id) const override final
+    util::guidance::EntryClass GetEntryClass(const EdgeID turn_id) const override final
     {
+        auto entry_class_id = turn_data.GetEntryClassID(turn_id);
         return m_entry_class_table.at(entry_class_id);
     }
 
@@ -854,6 +879,12 @@ class ContiguousInternalMemoryDataFacadeBase : public BaseDataFacade
                 m_lane_description_masks.begin() +
                     m_lane_description_offsets[lane_description_id + 1]);
     }
+
+    bool IsLeftHandDriving(const NodeID id) const override final
+    {
+        // TODO: can be moved to a data block indexed by GeometryID
+        return edge_based_node_data.IsLeftHandDriving(id);
+    }
 };
 
 template <typename AlgorithmT> class ContiguousInternalMemoryDataFacade;
@@ -864,23 +895,10 @@ class ContiguousInternalMemoryDataFacade<CH>
       public ContiguousInternalMemoryAlgorithmDataFacade<CH>
 {
   public:
-    ContiguousInternalMemoryDataFacade(std::shared_ptr<ContiguousBlockAllocator> allocator)
-        : ContiguousInternalMemoryDataFacadeBase(allocator),
-          ContiguousInternalMemoryAlgorithmDataFacade<CH>(allocator)
-
-    {
-    }
-};
-
-template <>
-class ContiguousInternalMemoryDataFacade<CoreCH> final
-    : public ContiguousInternalMemoryDataFacade<CH>,
-      public ContiguousInternalMemoryAlgorithmDataFacade<CoreCH>
-{
-  public:
-    ContiguousInternalMemoryDataFacade(std::shared_ptr<ContiguousBlockAllocator> allocator)
-        : ContiguousInternalMemoryDataFacade<CH>(allocator),
-          ContiguousInternalMemoryAlgorithmDataFacade<CoreCH>(allocator)
+    ContiguousInternalMemoryDataFacade(std::shared_ptr<ContiguousBlockAllocator> allocator,
+                                       const std::size_t exclude_index)
+        : ContiguousInternalMemoryDataFacadeBase(allocator, exclude_index),
+          ContiguousInternalMemoryAlgorithmDataFacade<CH>(allocator, exclude_index)
 
     {
     }
@@ -891,19 +909,24 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
     // MLD data
     partition::MultiLevelPartitionView mld_partition;
     partition::CellStorageView mld_cell_storage;
+    customizer::CellMetricView mld_cell_metric;
     using QueryGraph = customizer::MultiLevelEdgeBasedGraphView;
     using GraphNode = QueryGraph::NodeArrayEntry;
     using GraphEdge = QueryGraph::EdgeArrayEntry;
 
     QueryGraph query_graph;
 
-    void InitializeInternalPointers(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeInternalPointers(storage::DataLayout &data_layout,
+                                    char *memory_block,
+                                    const std::size_t exclude_index)
     {
-        InitializeMLDDataPointers(data_layout, memory_block);
+        InitializeMLDDataPointers(data_layout, memory_block, exclude_index);
         InitializeGraphPointer(data_layout, memory_block);
     }
 
-    void InitializeMLDDataPointers(storage::DataLayout &data_layout, char *memory_block)
+    void InitializeMLDDataPointers(storage::DataLayout &data_layout,
+                                   char *memory_block,
+                                   const std::size_t exclude_index)
     {
         if (data_layout.GetBlockSize(storage::DataLayout::MLD_PARTITION) > 0)
         {
@@ -930,13 +953,32 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
                 partition::MultiLevelPartitionView{level_data, partition, cell_to_children};
         }
 
-        if (data_layout.GetBlockSize(storage::DataLayout::MLD_CELL_WEIGHTS) > 0)
-        {
-            BOOST_ASSERT(data_layout.GetBlockSize(storage::DataLayout::MLD_CELLS) > 0);
-            BOOST_ASSERT(data_layout.GetBlockSize(storage::DataLayout::MLD_CELL_LEVEL_OFFSETS) > 0);
+        const auto weights_block_id = static_cast<storage::DataLayout::BlockID>(
+            storage::DataLayout::MLD_CELL_WEIGHTS_0 + exclude_index);
+        const auto durations_block_id = static_cast<storage::DataLayout::BlockID>(
+            storage::DataLayout::MLD_CELL_DURATIONS_0 + exclude_index);
 
-            auto mld_cell_weights_ptr = data_layout.GetBlockPtr<EdgeWeight>(
-                memory_block, storage::DataLayout::MLD_CELL_WEIGHTS);
+        if (data_layout.GetBlockSize(weights_block_id) > 0)
+        {
+            auto mld_cell_weights_ptr =
+                data_layout.GetBlockPtr<EdgeWeight>(memory_block, weights_block_id);
+            auto mld_cell_durations_ptr =
+                data_layout.GetBlockPtr<EdgeDuration>(memory_block, durations_block_id);
+            auto weight_entries_count =
+                data_layout.GetBlockEntries(storage::DataLayout::MLD_CELL_WEIGHTS_0);
+            auto duration_entries_count =
+                data_layout.GetBlockEntries(storage::DataLayout::MLD_CELL_DURATIONS_0);
+            BOOST_ASSERT(weight_entries_count == duration_entries_count);
+            util::vector_view<EdgeWeight> weights(mld_cell_weights_ptr, weight_entries_count);
+            util::vector_view<EdgeDuration> durations(mld_cell_durations_ptr,
+                                                      duration_entries_count);
+
+            mld_cell_metric = customizer::CellMetricView{std::move(weights), std::move(durations)};
+        }
+
+        if (data_layout.GetBlockSize(storage::DataLayout::MLD_CELLS) > 0)
+        {
+
             auto mld_source_boundary_ptr = data_layout.GetBlockPtr<NodeID>(
                 memory_block, storage::DataLayout::MLD_CELL_SOURCE_BOUNDARY);
             auto mld_destination_boundary_ptr = data_layout.GetBlockPtr<NodeID>(
@@ -946,8 +988,6 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
             auto mld_cell_level_offsets_ptr = data_layout.GetBlockPtr<std::uint64_t>(
                 memory_block, storage::DataLayout::MLD_CELL_LEVEL_OFFSETS);
 
-            auto weight_entries_count =
-                data_layout.GetBlockEntries(storage::DataLayout::MLD_CELL_WEIGHTS);
             auto source_boundary_entries_count =
                 data_layout.GetBlockEntries(storage::DataLayout::MLD_CELL_SOURCE_BOUNDARY);
             auto destination_boundary_entries_count =
@@ -956,7 +996,6 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
             auto cell_level_offsets_entries_count =
                 data_layout.GetBlockEntries(storage::DataLayout::MLD_CELL_LEVEL_OFFSETS);
 
-            util::vector_view<EdgeWeight> weights(mld_cell_weights_ptr, weight_entries_count);
             util::vector_view<NodeID> source_boundary(mld_source_boundary_ptr,
                                                       source_boundary_entries_count);
             util::vector_view<NodeID> destination_boundary(mld_destination_boundary_ptr,
@@ -966,8 +1005,7 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
             util::vector_view<std::uint64_t> level_offsets(mld_cell_level_offsets_ptr,
                                                            cell_level_offsets_entries_count);
 
-            mld_cell_storage = partition::CellStorageView{std::move(weights),
-                                                          std::move(source_boundary),
+            mld_cell_storage = partition::CellStorageView{std::move(source_boundary),
                                                           std::move(destination_boundary),
                                                           std::move(cells),
                                                           std::move(level_offsets)};
@@ -1001,10 +1039,10 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
 
   public:
     ContiguousInternalMemoryAlgorithmDataFacade(
-        std::shared_ptr<ContiguousBlockAllocator> allocator_)
+        std::shared_ptr<ContiguousBlockAllocator> allocator_, const std::size_t exclude_index)
         : allocator(std::move(allocator_))
     {
-        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory());
+        InitializeInternalPointers(allocator->GetLayout(), allocator->GetMemory(), exclude_index);
     }
 
     const partition::MultiLevelPartitionView &GetMultiLevelPartition() const override
@@ -1013,6 +1051,8 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
     }
 
     const partition::CellStorageView &GetCellStorage() const override { return mld_cell_storage; }
+
+    const customizer::CellMetricView &GetCellMetric() const override { return mld_cell_metric; }
 
     // search graph access
     unsigned GetNumberOfNodes() const override final { return query_graph.GetNumberOfNodes(); }
@@ -1030,10 +1070,6 @@ template <> class ContiguousInternalMemoryAlgorithmDataFacade<MLD> : public Algo
     {
         return query_graph.GetEdgeData(e);
     }
-
-    EdgeID BeginEdges(const NodeID n) const override final { return query_graph.BeginEdges(n); }
-
-    EdgeID EndEdges(const NodeID n) const override final { return query_graph.EndEdges(n); }
 
     EdgeRange GetAdjacentEdgeRange(const NodeID node) const override final
     {
@@ -1059,9 +1095,10 @@ class ContiguousInternalMemoryDataFacade<MLD> final
 {
   private:
   public:
-    ContiguousInternalMemoryDataFacade(std::shared_ptr<ContiguousBlockAllocator> allocator)
-        : ContiguousInternalMemoryDataFacadeBase(allocator),
-          ContiguousInternalMemoryAlgorithmDataFacade<MLD>(allocator)
+    ContiguousInternalMemoryDataFacade(std::shared_ptr<ContiguousBlockAllocator> allocator,
+                                       const std::size_t exclude_index)
+        : ContiguousInternalMemoryDataFacadeBase(allocator, exclude_index),
+          ContiguousInternalMemoryAlgorithmDataFacade<MLD>(allocator, exclude_index)
 
     {
     }

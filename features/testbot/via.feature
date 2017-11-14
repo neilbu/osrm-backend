@@ -224,34 +224,6 @@ Feature: Via points
             | a,d,c     | abc,bd,bd,bd,abc,abc |
             | c,d,a     | abc,bd,bd,bd,abc,abc |
 
-    # See issue #1896
-    Scenario: Via point at a dead end with barrier
-        Given the profile "car"
-        Given the node map
-            """
-            a b c
-              1
-              d
-
-
-            f e
-            """
-
-        And the nodes
-            | node | barrier |
-            | d    | bollard |
-
-        And the ways
-            | nodes |
-            | abc   |
-            | bd    |
-            | afed  |
-
-        When I route I should get
-            | waypoints | route                   |
-            | a,1,c     | abc,bd,bd,bd,bd,abc,abc |
-            | c,1,a     | abc,bd,bd,bd,bd,abc,abc |
-
     Scenario: Via points on ring on the same oneway, forces one of the vertices to be top node
         Given the node map
             """
@@ -349,6 +321,67 @@ Feature: Via points
             | ab    |
 
         When I route I should get
-            | waypoints | bearings   | route    | turns                    |
-            | 1,a       | 90,2 270,2 | ab,ab,ab | depart,turn uturn,arrive |
-            | 1,b       | 270,2 90,2 | ab,ab,ab | depart,turn uturn,arrive |
+            | waypoints | bearings   | route    | turns                        |
+            | 1,a       | 90,2 270,2 | ab,ab,ab | depart,continue uturn,arrive |
+            | 1,b       | 270,2 90,2 | ab,ab,ab | depart,continue uturn,arrive |
+
+    Scenario: Continue Straight in presence of Bearings
+        Given the node map
+            """
+            h - a 1 b -- g
+                |   |
+                |   |- 2 c - f
+                |        3
+                e ------ d - i
+                         |
+                         j
+            """
+
+        And the query options
+            | continue_straight | false |
+
+        And the ways
+            | nodes | oneway |
+            | ab    | no     |
+            | bc    | no     |
+            | cdea  | no     |
+            | ah    | yes    |
+            | bg    | yes    |
+            | cf    | yes    |
+            | di    | yes    |
+            | dj    | yes    |
+
+        When I route I should get
+            | waypoints | bearings               | route                           |
+            | 1,2,3     | 270,90 180,180 180,180 | ab,cdea,cdea,bc,bc,bc,cdea,cdea |
+
+    Scenario: Continue Straight in presence of Bearings
+        Given the node map
+            """
+            h - a 1 b -- g
+                |   |
+                |   |- 2 c - f
+                |        3
+                e ------ d - i
+                         |
+                         j
+            """
+
+        And the query options
+            | continue_straight | true |
+
+        And the ways
+            | nodes | oneway |
+            | ab    | no     |
+            | bc    | no     |
+            | cdea  | no     |
+            | ah    | yes    |
+            | bg    | yes    |
+            | cf    | yes    |
+            | di    | yes    |
+            | dj    | yes    |
+
+        When I route I should get
+            | waypoints | bearings               | route                                   |
+            | 1,2,3     | 270,90 180,180 180,180 | ab,cdea,cdea,bc,bc,bc,ab,cdea,cdea,cdea |
+

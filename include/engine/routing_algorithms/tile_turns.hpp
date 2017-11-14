@@ -2,7 +2,7 @@
 #define OSRM_ENGINE_ROUTING_ALGORITHMS_TILE_TURNS_HPP
 
 #include "engine/algorithm.hpp"
-#include "engine/datafacade/contiguous_internalmem_datafacade.hpp"
+#include "engine/datafacade.hpp"
 
 #include "util/coordinate.hpp"
 #include "util/typedefs.hpp"
@@ -24,14 +24,18 @@ struct TurnData final
     const int turn_angle;
     const EdgeWeight weight;
     const EdgeWeight duration;
+    const extractor::guidance::TurnInstruction turn_instruction;
 };
 
 using RTreeLeaf = datafacade::BaseDataFacade::RTreeLeaf;
 
-std::vector<TurnData>
-getTileTurns(const datafacade::ContiguousInternalMemoryDataFacade<ch::Algorithm> &facade,
-             const std::vector<RTreeLeaf> &edges,
-             const std::vector<std::size_t> &sorted_edge_indexes);
+std::vector<TurnData> getTileTurns(const DataFacade<ch::Algorithm> &facade,
+                                   const std::vector<RTreeLeaf> &edges,
+                                   const std::vector<std::size_t> &sorted_edge_indexes);
+
+std::vector<TurnData> getTileTurns(const DataFacade<mld::Algorithm> &facade,
+                                   const std::vector<RTreeLeaf> &edges,
+                                   const std::vector<std::size_t> &sorted_edge_indexes);
 
 } // namespace routing_algorithms
 } // namespace engine

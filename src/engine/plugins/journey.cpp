@@ -61,7 +61,7 @@ Status JourneyPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms
         ((num_coordinates * num_coordinates) >
          static_cast<std::size_t>(max_locations_distance_table * max_locations_distance_table)))
     {
-        return Error("TooBig", "Too many table coordinates", result);
+        return Error("TooBig", "Too many journey coordinates", result);
     }
    
     const auto &facade = algorithms.GetFacade();
@@ -70,19 +70,12 @@ Status JourneyPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms
     const bool continue_straight_at_waypoint = facade.GetContinueStraightDefault();
 
     std::vector<std::pair<EdgeWeight, double>> result_table;
-    
-    for (unsigned sourceIndex = 0; sourceIndex < num_coordinates; ++sourceIndex)
+    // For journeys, we expect coordinate pairs, not just a list, so iterate through half the list
+    unsigned upperBound = num_coordinates / 2;
+    for (unsigned sourceIndex = 0; sourceIndex < upperBound; ++sourceIndex)
     {
-        const auto sourceNode = snapped_phantoms[sourceIndex];
-	for (unsigned targetIndex = 0; targetIndex < num_coordinates; ++targetIndex) 
-	{
-	    if (sourceIndex == targetIndex) 
-	    {
-		result_table.emplace_back(std::make_pair(0, 0));
-	    }
-	    else
-	    {
-		const auto targetNode = snapped_phantoms[targetIndex];
+        const auto sourceNode = snapped_phantoms[sourceIndex * 2];
+		const auto targetNode = snapped_phantoms[(sourceIndex * 2) + 1];
 		std::vector<PhantomNodes> start_end_nodes;
 		start_end_nodes.push_back(PhantomNodes{sourceNode, targetNode});
 		auto &last_inserted = start_end_nodes.back();
@@ -157,9 +150,6 @@ Status JourneyPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms
 
 	    }
 	  
-	}
-    }
-    
     if (result_table.empty())
     {
         return Error("NoJourney", "No journeys found", result);

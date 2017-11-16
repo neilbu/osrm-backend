@@ -41,11 +41,9 @@ class MatrixAPI final : public BaseAPI
                               util::json::Object &response) const
     {
         auto number_of_coordinates = phantoms.size();
-	response.values["sources"] = MakeWaypoints(phantoms);
-	response.values["destinations"] = MakeWaypoints(phantoms);
-
-        response.values["durations"] =
-            MakeMatrix(durations, number_of_coordinates);
+        response.values["sources"] = MakeWaypoints(phantoms);
+        response.values["destinations"] = MakeWaypoints(phantoms);
+        response.values["distances"] = MakeMatrix(durations, number_of_coordinates);
         response.values["code"] = "Ok";
     }
 
